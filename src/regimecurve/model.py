@@ -48,6 +48,9 @@ class StochasticRegimeExpert(nn.Module):
         self.cell = nn.GRUCell(state_dim + noise_dim + hidden_dim, hidden_dim)
         self.drift_head = nn.Linear(hidden_dim, state_dim)
         self.volatility_head = nn.Linear(hidden_dim, state_dim)
+        self.shape_target_head = (
+            nn.Linear(hidden_dim, state_dim - 3) if state_dim > 3 else None
+        )
         # Prefer slope/curvature diversity over dominant parallel level shifts.
         # Residual spline coordinates need enough prior variance to create genuine
         # twists instead of leaving all diversity to the common level factor.
@@ -61,6 +64,7 @@ class StochasticRegimeExpert(nn.Module):
         self.raw_shock_scale = nn.Parameter(initial)
         self.raw_drift_scale = nn.Parameter(torch.tensor(-0.6931))
         self.raw_mean_reversion = nn.Parameter(torch.tensor(-0.6931))
+        self.raw_shape_target_scale = nn.Parameter(torch.tensor(inverse_softplus(0.50)))
 
     def forward(self, encoded: torch.Tensor, path_noise: torch.Tensor,
                 daily_noise: torch.Tensor, initial_state: torch.Tensor) -> torch.Tensor:
@@ -71,6 +75,13 @@ class StochasticRegimeExpert(nn.Module):
         shock_scale = F.softplus(self.raw_shock_scale)
         drift_scale = 0.03 * torch.sigmoid(self.raw_drift_scale)
         mean_reversion = 0.20 * torch.sigmoid(self.raw_mean_reversion)
+        target_state = initial_state.clone()
+        if self.shape_target_head is not None:
+            # The path code defines a persistent destination only in the spline
+            # subspace. This skip connection cannot create a parallel shift and
+            # prevents higher-order butterflies from being averaged away.
+            shape_target = torch.tanh(self.shape_target_head(condition))
+            target_state[:, 3:] += F.softplus(self.raw_shape_target_scale) * shape_target
         for day in range(self.horizon):
             hidden = self.cell(
                 torch.cat([state, daily_noise[:, day], condition], dim=-1), hidden
@@ -81,7 +92,7 @@ class StochasticRegimeExpert(nn.Module):
             increment = (
                 drift_scale * drift
                 + shock_scale * volatility * innovation
-                + mean_reversion * (initial_state - state)
+                + mean_reversion * (target_state - state)
             )
             state = state + increment
             generated.append(state)

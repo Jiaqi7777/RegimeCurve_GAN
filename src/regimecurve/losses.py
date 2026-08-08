@@ -60,6 +60,32 @@ def level_neutral_shape_covariance_loss(real: torch.Tensor, fake: torch.Tensor) 
     return (real_covariance - fake_covariance).square().mean() / normaliser
 
 
+def whitened_shape_covariance_loss(real: torch.Tensor, fake: torch.Tensor,
+                                   modes: int = 6) -> torch.Tensor:
+    """Give weak historical shape modes the same importance as leading modes.
+
+    Level-neutral historical covariance supplies the shape axes. Whitening by
+    their historical standard deviations makes a low-variance PC4 butterfly a
+    unit-variance target instead of letting PC1 dominate the Frobenius loss.
+    """
+    real_change = 100.0 * (real[:, -1] - real[:, 0])
+    fake_change = 100.0 * (fake[:, -1] - fake[:, 0])
+    real_shape = real_change - real_change.mean(dim=-1, keepdim=True)
+    fake_shape = fake_change - fake_change.mean(dim=-1, keepdim=True)
+    real_covariance = covariance_matrix(real_shape).detach()
+    eigenvalues, eigenvectors = torch.linalg.eigh(real_covariance)
+    retained = min(modes, real_shape.shape[-1] - 1, real_shape.shape[0] - 1)
+    eigenvalues = eigenvalues[-retained:].clamp_min(1e-3)
+    eigenvectors = eigenvectors[:, -retained:]
+    whitening = eigenvectors / eigenvalues.sqrt().unsqueeze(0)
+    fake_scores = (fake_shape - real_shape.mean(dim=0)) @ whitening
+    fake_covariance = covariance_matrix(fake_scores)
+    identity = torch.eye(retained, device=fake.device, dtype=fake.dtype)
+    covariance_error = (fake_covariance - identity).square().mean()
+    mean_error = fake_scores.mean(dim=0).square().mean()
+    return covariance_error + 0.1 * mean_error
+
+
 def correlation_matrix(values: torch.Tensor) -> torch.Tensor:
     flattened = values.reshape(-1, values.shape[-1])
     centred = flattened - flattened.mean(dim=0, keepdim=True)

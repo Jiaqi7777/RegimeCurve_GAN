@@ -24,6 +24,7 @@ from .losses import (
     shape_repulsion_loss,
     smoothness_loss,
     terminal_factor_loss,
+    whitened_shape_covariance_loss,
 )
 from .model import RegimeCurveGAN
 from .utils import ensure_output, load_config, set_seed
@@ -59,6 +60,7 @@ def validation_score(model: RegimeCurveGAN, loader, device: torch.device) -> flo
             moment_loss(real_curves, fake_curves)
             + 0.05 * covariance_loss(real_curves, fake_curves)
             + 0.25 * level_neutral_shape_covariance_loss(real_curves, fake_curves)
+            + 0.25 * whitened_shape_covariance_loss(real_curves, fake_curves)
             + 0.25 * correlation_loss(real_curves, fake_curves)
             + 0.10 * autocorrelation_loss(real_curves, fake_curves)
             + 0.10 * daily_tail_loss(real_curves, fake_curves)
@@ -128,6 +130,9 @@ def train(config: dict) -> Path:
                 generator_loss += cfg["covariance_weight"] * covariance_loss(real_expanded_curves, curves)
                 generator_loss += cfg["shape_covariance_weight"] * (
                     level_neutral_shape_covariance_loss(real_expanded_curves, curves)
+                )
+                generator_loss += cfg["whitened_shape_weight"] * (
+                    whitened_shape_covariance_loss(real_expanded_curves, curves)
                 )
                 generator_loss += cfg["correlation_weight"] * correlation_loss(
                     real_expanded_curves, curves

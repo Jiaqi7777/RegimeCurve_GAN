@@ -93,6 +93,8 @@ This division encourages coherence across the horizon while avoiding determinist
 
 Each regime expert is a GRUCell decoder. At every forecast day it consumes the previous latent state, encoded context, path code, and a fresh daily innovation. Separate heads predict drift and conditional volatility. Drift is capped separately, and learned mean reversion prevents persistent ten-day trends. Shock scales are initialised asymmetrically at `0.03` for level, `0.07` for slope, `0.09` for curvature, and `0.08` for each orthogonal spline coordinate. This gives local shape modes enough prior variance to compete with the dominant level factor.
 
+Each expert also predicts a path-level target in the orthogonal spline subspace. Mean reversion pulls only the six spline coordinates towards this scenario-specific target over the forecast horizon. This direct latent-to-shape connection prevents weak butterflies from being averaged away inside the recurrent decoder and cannot create an additional parallel level shift.
+
 A fixed global multiplier was replaced with separate positive drift and shock scales. The calibrated Student-\(t_5\) prior uses a base scale of `0.75` and regime multipliers `[0.7, 0.9, 1.1, 1.5]`.
 
 ### 5. Differentiable curve decoder
@@ -169,6 +171,7 @@ The critics minimise the conditional Wasserstein objectives with gradient penalt
 - **Moment loss** matches the mean and volatility of daily yield changes.
 - **Covariance loss** matches the covariance matrix of daily changes across maturities.
 - **Level-neutral shape-covariance loss** matches the covariance of ten-day maturity changes after removing each path's average shift. It directly targets the under-dispersion that makes terminal curves appear parallel.
+- **Whitened shape-covariance loss** diagonalises historical level-neutral covariance and scales each of its first six modes to unit variance before matching. Consequently, a historically small PC4 butterfly receives the same numerical importance as a large PC1 slope mode.
 - **Economic diversity loss** rewards latent noise that changes level, slope, and curvature, with additional weight on curvature.
 - **Latent-information loss** trains an auxiliary network to recover the path code from the generated scenario, discouraging the generator from ignoring noise.
 - **Within-context repulsion** separates four paths sampled from the same conditioning history.
@@ -182,12 +185,13 @@ The recommended initial weights are:
 smoothness_weight: 0.02
 moment_weight: 1.0
 covariance_weight: 0.05
-shape_covariance_weight: 0.25
+shape_covariance_weight: 0.40
+whitened_shape_weight: 0.25
 correlation_weight: 0.25
 autocorrelation_weight: 0.10
 terminal_weight: 1.0
 diversity_weight: 0.20
-conditional_spread_weight: 0.10
+conditional_spread_weight: 0.15
 shape_repulsion_weight: 0.05
 information_weight: 0.10
 repulsion_weight: 0.05

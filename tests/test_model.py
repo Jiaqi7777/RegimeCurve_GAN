@@ -13,6 +13,7 @@ from regimecurve.losses import (
     repulsion_loss,
     shape_repulsion_loss,
     terminal_factor_loss,
+    whitened_shape_covariance_loss,
 )
 from regimecurve.model import RegimeGenerator, ShapeCritic, TemporalCritic
 
@@ -51,6 +52,7 @@ def test_covariance_loss_is_zero_for_identical_curves():
     curves = torch.randn(8, 10, 13)
     assert covariance_loss(curves, curves).item() == pytest.approx(0.0)
     assert level_neutral_shape_covariance_loss(curves, curves).item() == pytest.approx(0.0)
+    assert whitened_shape_covariance_loss(curves, curves).item() == pytest.approx(0.0, abs=1e-5)
 
 
 def test_economic_features_and_repulsion_are_finite():

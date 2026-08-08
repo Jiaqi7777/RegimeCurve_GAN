@@ -200,7 +200,8 @@ def plot_pca(historical: np.ndarray, generated: np.ndarray, output: Path) -> tup
 
 
 def plot_shape_covariance_heatmaps(historical: np.ndarray, generated: np.ndarray,
-                                   columns: list[str], output: Path) -> float:
+                                   columns: list[str], output: Path
+                                   ) -> tuple[float, float, float, list[float]]:
     historical = historical - historical.mean(axis=-1, keepdims=True)
     generated = generated - generated.mean(axis=-1, keepdims=True)
     historical_covariance = np.cov((historical * 100).T)
@@ -224,7 +225,13 @@ def plot_shape_covariance_heatmaps(historical: np.ndarray, generated: np.ndarray
     fig.tight_layout()
     fig.savefig(output / "shape_covariance_heatmaps.png", dpi=180)
     plt.close(fig)
-    return float(np.linalg.norm(historical_covariance - generated_covariance, ord="fro"))
+    absolute_error = np.linalg.norm(historical_covariance - generated_covariance, ord="fro")
+    relative_error = absolute_error / np.linalg.norm(historical_covariance, ord="fro").clip(1e-8)
+    trace_ratio = np.trace(generated_covariance) / np.trace(historical_covariance).clip(1e-8)
+    historical_eigenvalues = np.linalg.eigvalsh(historical_covariance)[::-1]
+    generated_eigenvalues = np.linalg.eigvalsh(generated_covariance)[::-1]
+    mode_ratios = (generated_eigenvalues[:6] / historical_eigenvalues[:6].clip(1e-8)).tolist()
+    return float(absolute_error), float(relative_error), float(trace_ratio), mode_ratios
 
 
 def plot_correlation_heatmaps(historical_changes: np.ndarray, generated_changes: np.ndarray,
@@ -290,7 +297,8 @@ def evaluate(generated_path: str, historical_path: str, output_dir: str,
     output.mkdir(parents=True, exist_ok=True)
     representative, pca_spread_ratio = plot_pca(historical_curve_changes, generated_curve_changes, output)
     correlation_error = plot_correlation_heatmaps(historical_daily, generated_daily, columns, output)
-    shape_covariance_error = plot_shape_covariance_heatmaps(
+    (shape_covariance_error, relative_shape_covariance_error,
+     shape_variance_ratio, shape_mode_variance_ratios) = plot_shape_covariance_heatmaps(
         historical_curve_changes, generated_curve_changes, columns, output
     )
     maturity_lower, maturity_upper = np.quantile(historical_curve_changes, [.05, .95], axis=0)
@@ -325,6 +333,12 @@ def evaluate(generated_path: str, historical_path: str, output_dir: str,
         "maximum_daily_move_bp": float(np.abs(generated_daily).max() * 100),
         "correlation_matrix_error": correlation_error,
         "level_neutral_shape_covariance_error": shape_covariance_error,
+        "relative_shape_covariance_error": relative_shape_covariance_error,
+        "generated_to_historical_shape_variance_ratio": shape_variance_ratio,
+        "generated_to_historical_shape_mode_variance_ratio": {
+            f"mode_{i + 1}": float(value)
+            for i, value in enumerate(shape_mode_variance_ratios)
+        },
     }
     warnings = []
     if metrics["outside_any_factor_fraction"] > .2:
@@ -333,6 +347,10 @@ def evaluate(generated_path: str, historical_path: str, output_dir: str,
         warnings.append("Generated PC2 spread is below 50% of history; possible shape under-dispersion.")
     if correlation_error > 2.0:
         warnings.append("Cross-maturity correlation error remains high.")
+    if shape_variance_ratio < .6:
+        warnings.append("Generated level-neutral shape variance is below 60% of history.")
+    if shape_variance_ratio > 1.4:
+        warnings.append("Generated level-neutral shape variance exceeds 140% of history.")
     if metrics["maximum_daily_move_bp"] > 25.0:
         warnings.append("At least one generated daily maturity move exceeds 25 bp.")
     if max(maturity_outside) > .25:
