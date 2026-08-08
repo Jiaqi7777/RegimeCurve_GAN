@@ -32,3 +32,6 @@ htmlcov/
 # OS / editor files
 .DS_Store
 .vscode/
+
+#test output
+outputs/*

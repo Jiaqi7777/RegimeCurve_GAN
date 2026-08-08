@@ -11,6 +11,8 @@ The implementation combines a regime-aware conditional Wasserstein GAN, an inter
 
 ## Contents
 
+- [Executive summary](#executive-summary)
+- [Iterative development and empirical progress](#iterative-development-and-empirical-progress)
 - [Architecture](#architecture)
 - [Design choices](#design-choices)
 - [Data and preprocessing](#data-and-preprocessing)
@@ -22,6 +24,69 @@ The implementation combines a regime-aware conditional Wasserstein GAN, an inter
 - [Limitations](#limitations)
 - [Future work](#future-work)
 - [Use of AI tools](#use-of-ai-tools)
+
+## Executive summary
+
+The final model is not the first plausible-looking GAN run. It is the result of repeatedly testing whether apparent diversity was economically meaningful. The initial generator produced curves that were almost parallel. Increasing the noise created dispersion but also unrealistic factor variance. The final architecture therefore separates broad Nelson–Siegel movements from six orthogonal spline shape coordinates and trains covariance across repeated futures from the same conditioning context.
+
+The supplied final evaluation contains only ten scenarios, as requested by the task. It demonstrates that the parallel-collapse problem is substantially reduced, but it is too small for definitive covariance or tail conclusions. The most important final metrics are:
+
+| Diagnostic | Ten-scenario result | Interpretation |
+|---|---:|---|
+| Mean absolute daily move | 3.13 bp | Plausible average movement |
+| Maximum daily move | 16.08 bp | Large-noise outliers are controlled |
+| Correlation-matrix error | 0.642 | Cross-maturity dependence is close to history |
+| PC1/PC2/PC3/PC4 spread ratios | 0.43 / 0.84 / 0.60 / 0.65 | Good PC2 coverage; leading and higher modes remain under-dispersed |
+| Generated/historical shape-variance ratio | 0.437 | Improved from 0.216, but still below the desired 0.6–1.4 range |
+| Relative shape-covariance error | 0.612 | Improved from 0.810 after within-context training |
+| Less representative than 95% of history | 0/10 | No generated scenario is isolated from conditional history |
+| Outside any factor 5–95% interval | 4/10 | Too noisy to interpret reliably with only ten draws |
+
+The correct conclusion is therefore not that calibration is finished. The model now generates non-parallel, historically recognisable curve shapes and materially better conditional covariance, while retaining an identifiable shortfall in total shape variance. A reportable final assessment should use at least 100 scenarios per context and several training seeds.
+
+## Iterative development and empirical progress
+
+### Step 1: initial conditional WGAN-GP
+
+The first implementation combined a GRU context encoder, four latent regime experts, Student-t innovations, a temporal critic, a shape critic, Nelson–Siegel factors, and residual PCA. It produced smooth curves, but visual inspection showed that nearly all scenarios retained the same maturity profile. The daily cross-maturity correlation error was 3.563. Non-zero numerical dispersion was not accepted as evidence of useful scenario diversity.
+
+![Initial generated curves with parallel-shift collapse](docs/progress/01_baseline_terminal.png)
+
+### Step 2: aggressive variance-prior experiment
+
+The author explicitly requested greater model complexity, very large noise, and a large variance prior to test whether the failure was simply insufficient stochasticity. Factor-specific scales, heavy-tailed regime multipliers, latent recovery, path repulsion, and stronger diversity terms were introduced. Diversity increased, but the experiment overshot: the level, slope, and curvature standard deviations reached 66.60, 30.47, and 15.88 bp, and mean terminal dispersion reached 39.31 bp. This run demonstrated that generic noise creates wide curves without guaranteeing calibrated shapes.
+
+![Aggressive-noise experiment](docs/progress/02_aggressive_noise_terminal.png)
+
+### Step 3: conditional calibration and orthogonal spline representation
+
+The author requested comparisons against conditionally similar historical episodes rather than an unconditional archive. Evaluation was expanded to use non-overlapping neighbours matched on current level, slope, curvature, and recent volatility. Factor-path envelopes, terminal boxplots, maturity envelopes, PCA representativeness, and correlation heatmaps were added.
+
+The author continued to reject the curves as too parallel. That diagnosis identified a representation bottleneck: three residual PCA factors preserved only dominant historical directions. They were replaced by six cubic-spline coordinates projected onto the orthogonal complement of the Nelson–Siegel basis. The resulting coordinates cannot reproduce another level, slope, or broad-curvature movement and must represent local twists and butterflies. PC2 and PC3 spread rose to 0.73 and 0.83, correlation error fell to 0.785, and slope/curvature standard deviations reached 8.55/6.27 bp. A 68.56 bp daily outlier nevertheless showed that heavy tails still required control.
+
+![Orthogonal-spline model](docs/progress/03_orthogonal_spline_terminal.png)
+
+### Step 4: explicit PC4 and local-butterfly modelling
+
+The author asked specifically for better PC4 coverage and shape covariance. A direct path-level target was added in the orthogonal spline subspace, together with a whitened covariance loss that prevents PC1 from numerically overwhelming weak historical modes. PC4 spread increased from 0.47 to 0.82. However, total level-neutral shape variance was only 0.216 of history and relative covariance error remained 0.810. This exposed a distinction between covering a low-variance mode and reproducing the total covariance magnitude.
+
+![PC4-enhanced model](docs/progress/04_pc4_enhanced_terminal.png)
+
+### Step 5: within-context covariance matching
+
+The author questioned why generated shape covariance remained pale despite broader PC3–PC4 coverage. Inspection found a training/evaluation mismatch. Training covariance was calculated across mixed contexts, so differences between conditional means could satisfy the loss. Evaluation instead sampled many futures from one fixed context. The final objective generates eight futures per context, removes each context's own generated mean shape, and calculates covariance only from the remaining within-context variation. A separate trace loss matches total shape energy, and checkpoint selection uses the same conditional criteria.
+
+On the ten-scenario evaluation, shape-variance coverage increased from 0.216 to 0.437, relative covariance error decreased from 0.810 to 0.612, correlation error improved from 0.864 to 0.642, and the maximum daily move decreased from 45.23 to 16.08 bp. PC4 settled at 0.65 rather than the previous 0.82, reflecting a more balanced objective rather than exclusive optimisation of one small component.
+
+![Final within-context model](docs/progress/05_within_context_terminal.png)
+
+| Stage | Level std | Slope std | Curvature std | PC2 | PC4 | Shape variance | Correlation error | Max daily move |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Initial | — | — | — | — | — | — | 3.563 | — |
+| Aggressive noise | 66.60 | 30.47 | 15.88 | — | — | — | 1.295 | 20.97 bp |
+| Orthogonal spline | 15.96 | 8.55 | 6.27 | 0.73 | 0.47 | — | 0.785 | 68.56 bp |
+| PC4 enhanced | 12.67 | 6.86 | 8.32 | 0.54 | 0.82 | 0.216 | 0.864 | 45.23 bp |
+| Within-context final | 18.32 | 8.72 | 7.03 | 0.84 | 0.65 | 0.437 | 0.642 | 16.08 bp |
 
 ## Architecture
 
@@ -262,7 +327,7 @@ uv run regimecurve-evaluate \
   --output-dir outputs/evaluation
 ```
 
-The evaluation directory contains terminal curves, conditional factor paths, maturity-wise envelopes, level-neutral shape changes, PCA representativeness for PC1–PC4, daily correlation heatmaps, and level-neutral shape-covariance heatmaps. Only 20 paths are drawn in crowded plots, while every generated scenario is retained for metrics. The report also compares results using 100 and 250 non-overlapping historical neighbours and measures maturity-specific 5–95% coverage and PC spread ratios.
+The evaluation directory contains terminal curves, conditional factor paths, maturity-wise envelopes, level-neutral shape changes, PCA representativeness for PC1–PC4, daily correlation heatmaps, and level-neutral shape-covariance heatmaps. Crowded plots cap display at 20 or 30 paths, while every generated scenario is retained for metrics. In the attached final run only ten scenarios were generated, so all ten are shown even where the generic legend states the plotting cap. The report also compares results using 100 and 250 non-overlapping historical neighbours and measures maturity-specific 5–95% coverage and PC spread ratios.
 
 ## Reproducing results
 
@@ -282,7 +347,7 @@ For a fast end-to-end smoke test, temporarily use:
 model:
   hidden_dim: 32
 training:
-  batch_size: 1024
+  batch_size: 256
   epochs: 1
   critic_steps: 2
 ```
@@ -294,6 +359,42 @@ GPU kernels and dependency versions can cause small numerical differences even w
 ## Evaluation
 
 Realism and diversity are evaluated separately.
+
+### Final ten-scenario evaluation
+
+The terminal curves retain the broad Treasury shape but differ materially in short-end level, belly depth, steepness, and long-end response. The absolute-yield view still shares a common backbone because every scenario begins from the same observed curve and Treasury maturities are strongly correlated.
+
+![Final terminal yield curves](docs/final_evaluation/terminal_curves.png)
+
+Removing each scenario's average maturity shift exposes the relevant geometry. Curves cross repeatedly and contain steepeners, flatteners, belly deformations, and local twists, showing that diversity is not produced only by parallel movement.
+
+![Level-neutral generated shape changes](docs/final_evaluation/level_neutral_shape_changes.png)
+
+Most maturity changes lie inside the conditional historical 5–95% envelope. Because only ten paths are shown, individual boundary crossings should be treated as examples rather than calibrated exceedance frequencies.
+
+![Generated maturity changes against conditional history](docs/final_evaluation/maturity_change_envelope.png)
+
+The factor comparison shows dispersion in level, 2s10s slope, and 2y–5y–10y curvature. The final generated means are -5.95, -0.27, and -2.68 bp, with standard deviations of 18.32, 8.72, and 7.03 bp. Four of ten paths fall outside at least one marginal 5–95% interval, but this joint statistic is particularly unstable at a sample size of ten.
+
+![Terminal factor changes](docs/final_evaluation/conditional_terminal_changes.png)
+
+Pathwise factor plots verify temporal diversity rather than terminal-only separation. Several scenarios reverse direction during the horizon, and slope and curvature paths do not simply inherit the level path.
+
+![Generated factor paths](docs/final_evaluation/factor_paths_conditional.png)
+
+The generated shape-covariance matrix now recovers the main historical sign structure: positive dependence within the short end, positive dependence within the long end, and negative short-versus-long interaction after removing level. Its magnitude remains too small, with total shape variance at 43.7% of the historical target. This is an explicit remaining limitation rather than evidence that the model is fully calibrated.
+
+![Historical and generated level-neutral covariance](docs/final_evaluation/shape_covariance_heatmaps.png)
+
+Daily correlation is substantially better matched than raw covariance. The Frobenius correlation error is 0.642, and the heatmaps reproduce the maturity-block structure without forcing tenors to move independently merely to make curves look different.
+
+![Historical and generated daily correlations](docs/final_evaluation/correlation_heatmaps.png)
+
+All ten generated changes lie near conditional historical observations in PCA space. Spread ratios are 0.43, 0.84, 0.60, and 0.65 for PC1–PC4. The figure is useful for detecting gross mode collapse, but ten points cannot estimate a four-dimensional distribution reliably.
+
+![PCA representativeness and local shape modes](docs/final_evaluation/representativeness_pca.png)
+
+The machine-readable metrics for this run are stored in [`docs/final_evaluation/metrics_10_scenarios.json`](docs/final_evaluation/metrics_10_scenarios.json).
 
 ### Realism diagnostics
 
@@ -352,11 +453,13 @@ Large Student-\(t\) shocks improve exploration but can create implausible paths 
 
 ### Evaluation sample size
 
-Ten requested scenarios are insufficient for reliable coverage or tail-risk estimates. Larger Monte Carlo samples are needed for model selection.
+Ten requested scenarios are insufficient for reliable coverage, covariance, PCA spread, or tail-risk estimates. A covariance estimate from ten curves has at most rank nine, and one scenario changes an empirical exceedance rate by ten percentage points. The ten-scenario figures are therefore submission examples; model selection requires at least 100 scenarios per context, several contexts, and several training seeds.
 
 ## Future work
 
 The current version uses straight-through Gumbel–Softmax during training and categorical regime sampling during inference. A useful extension would replace the fixed Student-\(t\) degrees of freedom and regime scales with calibrated or learned conditional distributions.
+
+The highest-priority next step is to repeat evaluation with at least 100 scenarios and three or more seeds. Checkpoint selection should report a Pareto table covering realism, within-context shape variance, covariance error, correlation error, factor coverage, and daily tails rather than selecting one visually attractive run.
 
 Other useful extensions include:
 
@@ -367,23 +470,45 @@ Other useful extensions include:
 5. missingness-aware training rather than deterministic interpolation;
 6. macroeconomic and policy-rate conditioning;
 7. differentiable discount-curve bootstrapping and soft no-arbitrage penalties;
-8. systematic ablation of regimes, residual factors, dual critics, covariance matching, and diversity regularisation.
+8. systematic ablation of regimes, spline targets, dual critics, whitening, trace matching, and within-context centring;
+9. context-specific historical covariance targets computed from training-only nearest neighbours rather than one aggregate historical target;
+10. calibration curves showing how covariance and tail metrics stabilise as the number of generated scenarios increases from 10 to 1,000.
 
 ## Use of AI tools
 
-AI coding assistance was used for:
+AI coding assistance was used to brainstorm the regime-aware WGAN-GP, scaffold the package, propose diagnostics, review tensor shapes and leakage risks, implement author-approved changes, write tests, run smoke checks, and draft documentation. It was not used as an automatic model-selection authority.
 
-- brainstorming the initial non-standard factor and regime architecture;
-- scaffolding the package structure and command-line entry points;
-- suggesting unit tests and reproducibility checks;
-- reviewing tensor shapes and data-leakage risks;
-- drafting documentation;
-- diagnosing the first generated scenarios and proposing targeted changes.
+### Author-led contributions and interventions
 
-AI output was treated as a source of proposals, not as an authority. All generated code was inspected, executed, tested, and revised. The end-to-end smoke test exposed a fully empty row in the Treasury archive that the initial implementation had not handled, and preprocessing was corrected accordingly.
+The direction of the iterative work was driven by the author's repeated inspection of generated curves:
 
-The most important disagreement concerned diversity. The initial AI-proposed architecture and metrics suggested that the generated scenarios had non-zero dispersion. Visual inspection showed that this was not sufficient: most variation resembled parallel shifts, curvature dispersion was small, and daily volatility was underestimated. The conclusion was therefore changed from “adequately diverse” to “under-dispersed in economically important directions.” The fixed increment multiplier was replaced by learnable factor-specific scales, and covariance matching was added to the generator objective.
+1. The author rejected the initial output as too parallel even though numerical dispersion was non-zero.
+2. The author requested higher complexity, much larger noise, and a large variance prior to stress-test whether stochastic capacity was the bottleneck.
+3. After observing excessive variance, the author requested historical representativeness plots rather than relying on visual diversity alone.
+4. The author identified that terminal curves still shared a common shape and requested explicit non-parallel diversity.
+5. The author requested PC4 and shape-covariance improvement after PC1–PC2 diagnostics proved insufficient.
+6. The author challenged the persistently pale generated covariance heatmap, which led to discovery of the mixed-context training versus fixed-context evaluation mismatch.
 
-Another rejected suggestion was to describe the model as arbitrage-aware merely because it generated smooth curves. Smoothness of Treasury par yields does not establish absence of arbitrage. The final description explicitly avoids that claim and treats differentiable curve bootstrapping as future work.
+These interventions materially changed the project from a generic factor GAN into a model with an orthogonal spline representation, PC3–PC4 diagnostics, path-level spline targets, within-context covariance matching, and trace calibration.
 
-The candidate should be able to explain every architectural component and reproduce the diagnostic reasoning without relying on AI-generated text. This section should be updated if further tools or manual changes are used before submission.
+### AI proposals that were accepted
+
+- chronological train/validation/test splitting to prevent overlap leakage;
+- separate temporal and maturity-shape critics;
+- path-level and daily Student-t noise;
+- latent regimes sampled with straight-through Gumbel–Softmax;
+- conditional historical neighbours for evaluation;
+- an orthogonal spline residual basis rather than independent maturity noise;
+- PCA, correlation, factor-path, level-neutral, and covariance diagnostics;
+- variance whitening for weak modes and a separate trace loss for total shape energy;
+- unit tests, linting, and end-to-end smoke tests after each structural change.
+
+### Disagreements and rejected suggestions
+
+The first AI assessment placed too much weight on non-zero dispersion and initially described the generated scenarios as sufficiently diverse. The author's visual diagnosis was correct: most movement was parallel and economically redundant. That assessment was revised, and subsequent decisions used level-neutral and covariance diagnostics.
+
+Simply increasing generic noise was also rejected as a final solution. The experiment requested by the author was useful because it demonstrated the failure: factor volatility became excessive without solving conditional shape calibration. Later changes targeted the representation and objective instead.
+
+The project does not describe smooth generated par-yield curves as arbitrage-free. Smoothness is not an arbitrage guarantee; differentiable bootstrapping and instrument conventions would be required. It also does not claim that ten scenarios validate tail risk or covariance.
+
+All AI-assisted code was executed and reviewed. Fourteen unit tests and the complete train–generate–evaluate smoke pipeline pass.
