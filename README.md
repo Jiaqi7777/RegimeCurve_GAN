@@ -87,7 +87,7 @@ Two types of randomness are supplied to the generator:
 - path-level noise controls the overall ten-day scenario;
 - daily noise introduces local shocks along the simulated path.
 
-This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity.
+This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity. After the first high-variance run produced too many stress-like terminal outcomes, the default base scale was reduced from `1.5` to `1.0` and the regime multipliers were recalibrated to `[0.7, 0.9, 1.2, 1.8]`.
 
 ### 4. Autoregressive stochastic regime experts
 
@@ -249,7 +249,7 @@ uv run regimecurve-evaluate \
   --output-dir outputs/evaluation
 ```
 
-The evaluation directory contains summary metrics and a terminal-curve plot.
+The evaluation directory contains `metrics.json`, the selected historical neighbours, the terminal-curve plot, full ten-day level/slope/curvature paths with conditional historical bands, and terminal factor changes against conditional historical distributions.
 
 ## Reproducing results
 
@@ -301,7 +301,7 @@ Realism and diversity are evaluated separately.
 - sensitivity of generated paths to latent noise;
 - expert usage and regime entropy.
 
-Generating only ten scenarios gives a useful visualisation but an unstable estimate of tail behaviour. Quantitative evaluation should use at least 100 scenarios per test context, even though the submitted example contains the ten scenarios requested by the task.
+Generating only ten scenarios gives a useful visualisation but an unstable estimate of tail behaviour. Quantitative evaluation should use at least 100 scenarios per test context, even though the submitted example contains the ten scenarios requested by the task. The evaluator finds the 250 historical starting states nearest to the current level, slope, curvature, and recent volatility. It reports the fraction of generated terminal outcomes outside their conditional 5–95% ranges and warns when any single-day maturity move exceeds 25 bp.
 
 Unconditional comparison with the complete 1990–2024 level distribution is not an appropriate measure for scenarios anchored to a 2024 context. Conditional evaluation should compare generated changes with historical ten-day changes starting from similar level, slope, curvature, and recent volatility.
 

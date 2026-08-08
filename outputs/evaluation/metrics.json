@@ -1,6 +1,50 @@
 {
-  "mean_absolute_yield_difference": 1.0727283223920727,
-  "mean_absolute_volatility_difference": 0.019793748696302925,
-  "correlation_matrix_error": 1.0025145930170631,
-  "path_diversity": 0.1665462325075459
+  "conditional_neighbours": 250,
+  "conditional_neighbour_distance_mean": 0.35707242515593485,
+  "terminal_factor_change_bp": {
+    "Level (10Y)": {
+      "generated_mean": 11.183343999999988,
+      "generated_std": 66.59873917183737,
+      "historical_p05": -25.54999999999999,
+      "historical_median": 3.000000000000025,
+      "historical_p95": 26.999999999999957,
+      "generated_outside_5_95_fraction": 0.9
+    },
+    "Slope (10Y-2Y)": {
+      "generated_mean": 11.70561699999999,
+      "generated_std": 30.473703841752837,
+      "historical_p05": -11.54999999999997,
+      "historical_median": -0.9999999999999787,
+      "historical_p95": 16.999999999999993,
+      "generated_outside_5_95_fraction": 0.8
+    },
+    "Curvature (2x5Y-2Y-10Y)": {
+      "generated_mean": 7.122605000000007,
+      "generated_std": 15.878597717772324,
+      "historical_p05": -8.000000000000007,
+      "historical_median": -6.661338147750939e-14,
+      "historical_p95": 7.000000000000028,
+      "generated_outside_5_95_fraction": 0.9
+    }
+  },
+  "generated_outside_any_factor_5_95_fraction": 0.9,
+  "mean_terminal_curve_dispersion_bp": 39.31414597925782,
+  "mean_absolute_daily_move_bp": 4.541921723076923,
+  "maximum_daily_move_bp": 20.972599999999986,
+  "maximum_daily_move_bp_by_scenario": [
+    20.972599999999986,
+    17.72625999999997,
+    11.194799999999994,
+    9.958940000000016,
+    15.521899999999977,
+    10.328159999999986,
+    15.724560000000043,
+    15.425539999999938,
+    11.180599999999963,
+    15.610829999999964
+  ],
+  "correlation_matrix_error": 1.2951296932120693,
+  "warnings": [
+    "90% of scenarios fall outside at least one conditional 5\u201395% factor range."
+  ]
 }

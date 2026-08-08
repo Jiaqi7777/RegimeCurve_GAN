@@ -16,8 +16,8 @@ model:
 noise:
   distribution: student_t
   degrees_of_freedom: 5.0
-  base_scale: 1.5
-  regime_scales: [0.7, 1.0, 1.5, 2.5]
+  base_scale: 1.0
+  regime_scales: [0.7, 0.9, 1.2, 1.8]
 training:
   batch_size: 128
   epochs: 250
