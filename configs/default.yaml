@@ -1,0 +1,36 @@
+seed: 42
+data:
+  path: data/data.xlsx
+  context_days: 3
+  horizon_days: 10
+  train_end: "2017-12-31"
+  validation_end: "2020-12-31"
+  residual_components: 3
+  nelson_siegel_lambda: 0.7308
+model:
+  latent_dim: 16
+  daily_noise_dim: 16
+  hidden_dim: 256
+  num_regimes: 4
+  gumbel_temperature: 0.5
+noise:
+  distribution: student_t
+  degrees_of_freedom: 5.0
+  base_scale: 1.5
+  regime_scales: [0.7, 1.0, 1.5, 2.5]
+training:
+  batch_size: 128
+  epochs: 250
+  critic_steps: 5
+  learning_rate: 0.0001
+  gradient_penalty: 10.0
+  smoothness_weight: 0.01
+  moment_weight: 1.0
+  covariance_weight: 0.05
+  diversity_weight: 0.20
+  information_weight: 0.10
+  repulsion_weight: 0.05
+  regime_balance_weight: 0.01
+  paths_per_context: 4
+  num_workers: 0
+output_dir: outputs

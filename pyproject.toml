@@ -1,0 +1,37 @@
+[project]
+name = "regimecurve-gan"
+version = "0.1.0"
+description = "Regime-aware conditional WGAN-GP for US Treasury yield-curve scenarios"
+requires-python = ">=3.11"
+dependencies = [
+  "matplotlib>=3.9",
+  "numpy>=2.0",
+  "openpyxl>=3.1",
+  "pandas>=2.2",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.5",
+  "torch>=2.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "ruff>=0.8"]
+
+[project.scripts]
+regimecurve-train = "regimecurve.train:main"
+regimecurve-generate = "regimecurve.generate:main"
+regimecurve-evaluate = "regimecurve.evaluate:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/regimecurve"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
