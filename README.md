@@ -87,13 +87,13 @@ Two types of randomness are supplied to the generator:
 - path-level noise controls the overall ten-day scenario;
 - daily noise introduces local shocks along the simulated path.
 
-This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity. After the first high-variance run produced too many stress-like terminal outcomes, the default base scale was reduced from `1.5` to `1.0` and the regime multipliers were recalibrated to `[0.7, 0.9, 1.2, 1.8]`.
+This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity. The calibrated defaults use a base scale of `0.75` and regime multipliers `[0.7, 0.9, 1.1, 1.5]`.
 
 ### 4. Autoregressive stochastic regime experts
 
-Each regime expert is a GRUCell decoder. At every forecast day it consumes the previous latent state, encoded context, path code, and a fresh daily innovation. Separate heads predict drift and conditional volatility. One sampled expert produces the complete scenario, and increments accumulate from the last observed state.
+Each regime expert is a GRUCell decoder. At every forecast day it consumes the previous latent state, encoded context, path code, and a fresh daily innovation. Separate heads predict drift and conditional volatility. One sampled expert produces the complete scenario, and increments accumulate from the last observed state. Drift and shocks have separate positive scales: drift is capped at `0.03`, while stochastic shocks retain factor-specific amplitudes. A learned mean-reversion term pulls paths gently toward the conditioning state. This controls persistent ten-day trends without removing regime or within-regime diversity.
 
-A fixed global multiplier initially produced movements that were systematically too small. It was replaced with positive, learnable, factor-specific step scales. Level, slope, curvature, and residual factors can consequently learn different shock amplitudes while the positivity constraint keeps their interpretation stable.
+A fixed global multiplier initially produced movements that were systematically too small. It was replaced with positive, learnable, factor-specific shock scales plus a separately constrained drift scale. Level, slope, curvature, and residual factors can consequently learn different stochastic amplitudes without allowing persistent drift to dominate the ten-day outcome.
 
 ### 5. Differentiable curve decoder
 
@@ -181,6 +181,8 @@ The recommended initial weights are:
 smoothness_weight: 0.02
 moment_weight: 1.0
 covariance_weight: 0.05
+autocorrelation_weight: 0.10
+terminal_weight: 1.0
 diversity_weight: 0.20
 information_weight: 0.10
 repulsion_weight: 0.05
@@ -249,7 +251,7 @@ uv run regimecurve-evaluate \
   --output-dir outputs/evaluation
 ```
 
-The evaluation directory contains `metrics.json`, the selected historical neighbours, the terminal-curve plot, full ten-day level/slope/curvature paths with conditional historical bands, and terminal factor changes against conditional historical distributions.
+The evaluation directory contains summary metrics, non-overlapping conditional historical neighbours, terminal curves, full factor paths, terminal factor boxplots, a maturity-wise historical envelope, and a PCA representativeness map. The PCA plot answers a different question from diversity: generated points should cover the historical cloud rather than collapse to its centre or sit far outside it.
 
 ## Reproducing results
 
@@ -289,6 +291,7 @@ Realism and diversity are evaluated separately.
 - level, slope, and curvature distributions;
 - cross-maturity correlation and covariance matrices;
 - lag-one autocorrelation;
+- terminal factor means, standard deviations, and 5th/50th/95th percentiles;
 - PCA eigenvalue spectrum;
 - continuity between the last context day and first generated day;
 - maximum daily movement and path roughness.
@@ -300,8 +303,9 @@ Realism and diversity are evaluated separately.
 - dispersion of level, slope, and curvature;
 - sensitivity of generated paths to latent noise;
 - expert usage and regime entropy.
+- nearest-historical-neighbour percentiles in the full maturity-change space.
 
-Generating only ten scenarios gives a useful visualisation but an unstable estimate of tail behaviour. Quantitative evaluation should use at least 100 scenarios per test context, even though the submitted example contains the ten scenarios requested by the task. The evaluator finds the 250 historical starting states nearest to the current level, slope, curvature, and recent volatility. It reports the fraction of generated terminal outcomes outside their conditional 5–95% ranges and warns when any single-day maturity move exceeds 25 bp.
+Generating only ten scenarios gives a useful visualisation but an unstable estimate of tail behaviour. Quantitative evaluation should use at least 100 scenarios per test context, even though the submitted example contains the ten scenarios requested by the task.
 
 Unconditional comparison with the complete 1990–2024 level distribution is not an appropriate measure for scenarios anchored to a 2024 context. Conditional evaluation should compare generated changes with historical ten-day changes starting from similar level, slope, curvature, and recent volatility.
 

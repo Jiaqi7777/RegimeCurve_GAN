@@ -9,6 +9,7 @@ from torch.optim import Adam
 
 from .data import make_loader, prepare_data
 from .losses import (
+    autocorrelation_loss,
     covariance_loss,
     diversity_loss,
     economic_curve_features,
@@ -17,6 +18,7 @@ from .losses import (
     regime_balance_loss,
     repulsion_loss,
     smoothness_loss,
+    terminal_factor_loss,
 )
 from .model import RegimeCurveGAN
 from .utils import ensure_output, load_config, set_seed
@@ -48,8 +50,12 @@ def validation_score(model: RegimeCurveGAN, loader, device: torch.device) -> flo
         context, future = context.to(device), future.to(device)
         generated, _, _, _ = model.generator(context)
         real_curves, fake_curves = model.decoder(future), model.decoder(generated)
-        scores.append((moment_loss(real_curves, fake_curves)
-                       + 0.05 * covariance_loss(real_curves, fake_curves)).item())
+        scores.append((
+            moment_loss(real_curves, fake_curves)
+            + 0.05 * covariance_loss(real_curves, fake_curves)
+            + 0.10 * autocorrelation_loss(real_curves, fake_curves)
+            + terminal_factor_loss(real_curves, fake_curves)
+        ).item())
     model.train()
     return float(sum(scores) / max(len(scores), 1))
 
@@ -112,6 +118,12 @@ def train(config: dict) -> Path:
                 generator_loss += cfg["smoothness_weight"] * smoothness_loss(curves)
                 generator_loss += cfg["moment_weight"] * moment_loss(real_expanded_curves, curves)
                 generator_loss += cfg["covariance_weight"] * covariance_loss(real_expanded_curves, curves)
+                generator_loss += cfg["autocorrelation_weight"] * autocorrelation_loss(
+                    real_expanded_curves, curves
+                )
+                generator_loss += cfg["terminal_weight"] * terminal_factor_loss(
+                    real_expanded_curves, curves
+                )
                 generator_loss += cfg["diversity_weight"] * economic_diversity
                 generator_loss += cfg["information_weight"] * F.mse_loss(recovered_latent, latent)
                 generator_loss += cfg["repulsion_weight"] * repulsion_loss(economic)

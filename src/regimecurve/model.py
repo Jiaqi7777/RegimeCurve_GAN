@@ -48,11 +48,13 @@ class StochasticRegimeExpert(nn.Module):
         self.cell = nn.GRUCell(state_dim + noise_dim + hidden_dim, hidden_dim)
         self.drift_head = nn.Linear(hidden_dim, state_dim)
         self.volatility_head = nn.Linear(hidden_dim, state_dim)
-        # Positive and factor-specific. Curvature starts slightly above level and slope.
-        initial = torch.full((state_dim,), inverse_softplus(0.08))
+        # Stochastic shocks remain factor-specific; drift is deliberately much smaller.
+        initial = torch.full((state_dim,), inverse_softplus(0.05))
         if state_dim >= 3:
-            initial[2] = inverse_softplus(0.12)
-        self.raw_step_scale = nn.Parameter(initial)
+            initial[2] = inverse_softplus(0.07)
+        self.raw_shock_scale = nn.Parameter(initial)
+        self.raw_drift_scale = nn.Parameter(torch.tensor(-0.6931))
+        self.raw_mean_reversion = nn.Parameter(torch.tensor(-0.6931))
 
     def forward(self, encoded: torch.Tensor, path_noise: torch.Tensor,
                 daily_noise: torch.Tensor, initial_state: torch.Tensor) -> torch.Tensor:
@@ -60,7 +62,9 @@ class StochasticRegimeExpert(nn.Module):
         hidden = torch.tanh(self.initial_hidden(condition))
         state = initial_state
         generated = []
-        factor_scale = F.softplus(self.raw_step_scale)
+        shock_scale = F.softplus(self.raw_shock_scale)
+        drift_scale = 0.03 * torch.sigmoid(self.raw_drift_scale)
+        mean_reversion = 0.20 * torch.sigmoid(self.raw_mean_reversion)
         for day in range(self.horizon):
             hidden = self.cell(
                 torch.cat([state, daily_noise[:, day], condition], dim=-1), hidden
@@ -68,7 +72,11 @@ class StochasticRegimeExpert(nn.Module):
             drift = torch.tanh(self.drift_head(hidden))
             volatility = F.softplus(self.volatility_head(hidden)) + 1e-4
             innovation = daily_noise[:, day, :self.state_dim]
-            increment = factor_scale * (drift + volatility * innovation)
+            increment = (
+                drift_scale * drift
+                + shock_scale * volatility * innovation
+                + mean_reversion * (initial_state - state)
+            )
             state = state + increment
             generated.append(state)
         return torch.stack(generated, dim=1)

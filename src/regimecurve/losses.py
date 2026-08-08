@@ -43,6 +43,21 @@ def covariance_loss(real: torch.Tensor, fake: torch.Tensor) -> torch.Tensor:
     return (real_covariance - fake_covariance).square().mean() / normaliser
 
 
+def lag_one_autocorrelation(curves: torch.Tensor) -> torch.Tensor:
+    changes = daily_changes(curves)
+    previous = changes[:, :-1].reshape(-1, changes.shape[-1])
+    following = changes[:, 1:].reshape(-1, changes.shape[-1])
+    previous = previous - previous.mean(dim=0, keepdim=True)
+    following = following - following.mean(dim=0, keepdim=True)
+    covariance = (previous * following).mean(dim=0)
+    denominator = previous.square().mean(dim=0).sqrt() * following.square().mean(dim=0).sqrt()
+    return covariance / denominator.clamp_min(1e-6)
+
+
+def autocorrelation_loss(real: torch.Tensor, fake: torch.Tensor) -> torch.Tensor:
+    return (lag_one_autocorrelation(real) - lag_one_autocorrelation(fake)).square().mean()
+
+
 def diversity_loss(first: torch.Tensor, second: torch.Tensor,
                    noise_first: torch.Tensor, noise_second: torch.Tensor) -> torch.Tensor:
     output_distance = (first - second).abs().flatten(1).mean(1)
@@ -57,6 +72,19 @@ def economic_curve_features(curves: torch.Tensor) -> torch.Tensor:
     curvature = 2.0 * curves[..., 8] - curves[..., 6] - curves[..., 10]
     weights = curves.new_tensor([1.0, 1.5, 2.0])
     return torch.stack([level, slope, curvature], dim=-1) * weights
+
+
+def terminal_factor_loss(real: torch.Tensor, fake: torch.Tensor) -> torch.Tensor:
+    real_terminal = 100.0 * economic_curve_features(real[:, -1])
+    fake_terminal = 100.0 * economic_curve_features(fake[:, -1])
+    scale = real_terminal.std(dim=0).detach().clamp_min(1.0)
+    mean_error = ((real_terminal.mean(0) - fake_terminal.mean(0)) / scale).square().mean()
+    std_error = ((real_terminal.std(0) - fake_terminal.std(0)) / scale).square().mean()
+    quantiles = real_terminal.new_tensor([0.05, 0.50, 0.95])
+    real_quantiles = torch.quantile(real_terminal, quantiles, dim=0)
+    fake_quantiles = torch.quantile(fake_terminal, quantiles, dim=0)
+    quantile_error = ((real_quantiles - fake_quantiles) / scale).square().mean()
+    return mean_error + std_error + quantile_error
 
 
 def repulsion_loss(grouped_paths: torch.Tensor, bandwidth: float = 0.5) -> torch.Tensor:

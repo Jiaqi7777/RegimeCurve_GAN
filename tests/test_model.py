@@ -2,7 +2,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from regimecurve.losses import covariance_loss, economic_curve_features, repulsion_loss
+from regimecurve.losses import (
+    autocorrelation_loss,
+    covariance_loss,
+    economic_curve_features,
+    repulsion_loss,
+    terminal_factor_loss,
+)
 from regimecurve.model import RegimeGenerator, ShapeCritic, TemporalCritic
 
 
@@ -46,3 +52,9 @@ def test_economic_features_and_repulsion_are_finite():
     features = economic_curve_features(curves)
     assert features.shape == (3, 4, 10, 3)
     assert torch.isfinite(repulsion_loss(features))
+
+
+def test_calibration_losses_are_zero_for_identical_paths():
+    curves = torch.randn(32, 10, 13)
+    assert autocorrelation_loss(curves, curves).item() == pytest.approx(0.0)
+    assert terminal_factor_loss(curves, curves).item() == pytest.approx(0.0)

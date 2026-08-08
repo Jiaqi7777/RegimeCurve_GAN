@@ -16,8 +16,8 @@ model:
 noise:
   distribution: student_t
   degrees_of_freedom: 5.0
-  base_scale: 1.0
-  regime_scales: [0.7, 0.9, 1.2, 1.8]
+  base_scale: 0.75
+  regime_scales: [0.7, 0.9, 1.1, 1.5]
 training:
   batch_size: 128
   epochs: 250
@@ -27,6 +27,8 @@ training:
   smoothness_weight: 0.01
   moment_weight: 1.0
   covariance_weight: 0.05
+  autocorrelation_weight: 0.10
+  terminal_weight: 1.0
   diversity_weight: 0.20
   information_weight: 0.10
   repulsion_weight: 0.05
