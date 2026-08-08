@@ -12,6 +12,7 @@ ENV*/
 
 # Python cache and build artifacts
 __pycache__/
+*/*/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
