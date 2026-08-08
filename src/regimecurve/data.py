@@ -5,8 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import SplineTransformer, StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
 MATURITY_YEARS = {
@@ -53,7 +52,8 @@ class CurveTransform:
     residual_components: int
     factor_scaler: StandardScaler
     residual_scaler: StandardScaler
-    residual_pca: PCA
+    residual_basis: np.ndarray
+    residual_mean: np.ndarray
 
     @classmethod
     def fit(cls, curves: np.ndarray, maturities: np.ndarray, decay: float,
@@ -61,10 +61,29 @@ class CurveTransform:
         basis = nelson_siegel_basis(maturities, decay)
         beta = curves @ np.linalg.pinv(basis).T
         residuals = curves - beta @ basis.T
-        pca = PCA(n_components=min(residual_components, curves.shape[1] - 3)).fit(residuals)
-        scores = pca.transform(residuals)
-        return cls(maturities, decay, pca.n_components_, StandardScaler().fit(beta),
-                   StandardScaler().fit(scores), pca)
+        components = min(residual_components, curves.shape[1] - 3)
+        # Start from a rich cubic B-spline dictionary on log maturity, then remove
+        # every direction explained by Nelson--Siegel. The SVD only orthonormalises
+        # this projected spline span; unlike residual PCA it does not choose axes
+        # according to the largest historical variance and suppress local shapes.
+        spline_dictionary = SplineTransformer(
+            n_knots=max(4, components + 1), degree=3, include_bias=False,
+        ).fit_transform(np.log1p(maturities)[:, None])
+        ns_projector = basis @ np.linalg.pinv(basis)
+        projected = (np.eye(len(maturities)) - ns_projector) @ spline_dictionary
+        left, singular_values, _ = np.linalg.svd(projected, full_matrices=False)
+        rank = int((singular_values > 1e-8).sum())
+        components = min(components, rank)
+        residual_basis = left[:, :components]
+        # Fix arbitrary SVD signs so identical inputs give identical transforms.
+        signs = np.sign(residual_basis[np.abs(residual_basis).argmax(axis=0),
+                                       np.arange(components)])
+        residual_basis *= np.where(signs == 0, 1.0, signs)
+        residual_mean = residuals.mean(axis=0)
+        residual_mean = (np.eye(len(maturities)) - ns_projector) @ residual_mean
+        scores = (residuals - residual_mean) @ residual_basis
+        return cls(maturities, decay, components, StandardScaler().fit(beta),
+                   StandardScaler().fit(scores), residual_basis, residual_mean)
 
     @property
     def state_dim(self) -> int:
@@ -76,9 +95,10 @@ class CurveTransform:
         basis = nelson_siegel_basis(self.maturities, self.decay)
         beta = flat @ np.linalg.pinv(basis).T
         residual = flat - beta @ basis.T
+        scores = (residual - self.residual_mean) @ self.residual_basis
         states = np.concatenate([
             self.factor_scaler.transform(beta),
-            self.residual_scaler.transform(self.residual_pca.transform(residual)),
+            self.residual_scaler.transform(scores),
         ], axis=1)
         return states.reshape(*shape[:-1], self.state_dim).astype(np.float32)
 
@@ -88,7 +108,7 @@ class CurveTransform:
         beta = self.factor_scaler.inverse_transform(flat[:, :3])
         scores = self.residual_scaler.inverse_transform(flat[:, 3:])
         curves = beta @ nelson_siegel_basis(self.maturities, self.decay).T
-        curves += self.residual_pca.inverse_transform(scores)
+        curves += scores @ self.residual_basis.T + self.residual_mean
         return curves.reshape(*shape[:-1], len(self.maturities)).astype(np.float32)
 
     def torch_decoder_parameters(self) -> dict[str, np.ndarray]:
@@ -99,8 +119,8 @@ class CurveTransform:
             "beta_mean": self.factor_scaler.mean_.astype(np.float32),
             "res_scale": self.residual_scaler.scale_.astype(np.float32),
             "res_mean": self.residual_scaler.mean_.astype(np.float32),
-            "res_components": self.residual_pca.components_.astype(np.float32),
-            "residual_mean": self.residual_pca.mean_.astype(np.float32),
+            "res_components": self.residual_basis.T.astype(np.float32),
+            "residual_mean": self.residual_mean.astype(np.float32),
         }
 
 

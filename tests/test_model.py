@@ -4,9 +4,14 @@ torch = pytest.importorskip("torch")
 
 from regimecurve.losses import (
     autocorrelation_loss,
+    conditional_factor_spread_loss,
+    correlation_loss,
     covariance_loss,
+    daily_tail_loss,
     economic_curve_features,
+    level_neutral_shape_covariance_loss,
     repulsion_loss,
+    shape_repulsion_loss,
     terminal_factor_loss,
 )
 from regimecurve.model import RegimeGenerator, ShapeCritic, TemporalCritic
@@ -45,6 +50,7 @@ def test_critics_return_one_score_per_path():
 def test_covariance_loss_is_zero_for_identical_curves():
     curves = torch.randn(8, 10, 13)
     assert covariance_loss(curves, curves).item() == pytest.approx(0.0)
+    assert level_neutral_shape_covariance_loss(curves, curves).item() == pytest.approx(0.0)
 
 
 def test_economic_features_and_repulsion_are_finite():
@@ -56,5 +62,13 @@ def test_economic_features_and_repulsion_are_finite():
 
 def test_calibration_losses_are_zero_for_identical_paths():
     curves = torch.randn(32, 10, 13)
+    assert correlation_loss(curves, curves).item() == pytest.approx(0.0)
     assert autocorrelation_loss(curves, curves).item() == pytest.approx(0.0)
     assert terminal_factor_loss(curves, curves).item() == pytest.approx(0.0)
+    assert daily_tail_loss(curves, curves).item() == pytest.approx(0.0)
+
+
+def test_conditional_shape_losses_are_finite():
+    grouped = torch.randn(8, 4, 10, 13)
+    assert torch.isfinite(conditional_factor_spread_loss(grouped))
+    assert torch.isfinite(shape_repulsion_loss(grouped))

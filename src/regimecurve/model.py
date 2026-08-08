@@ -48,10 +48,16 @@ class StochasticRegimeExpert(nn.Module):
         self.cell = nn.GRUCell(state_dim + noise_dim + hidden_dim, hidden_dim)
         self.drift_head = nn.Linear(hidden_dim, state_dim)
         self.volatility_head = nn.Linear(hidden_dim, state_dim)
-        # Stochastic shocks remain factor-specific; drift is deliberately much smaller.
-        initial = torch.full((state_dim,), inverse_softplus(0.05))
+        # Prefer slope/curvature diversity over dominant parallel level shifts.
+        # Residual spline coordinates need enough prior variance to create genuine
+        # twists instead of leaving all diversity to the common level factor.
+        initial = torch.full((state_dim,), inverse_softplus(0.08))
+        if state_dim >= 1:
+            initial[0] = inverse_softplus(0.03)
+        if state_dim >= 2:
+            initial[1] = inverse_softplus(0.07)
         if state_dim >= 3:
-            initial[2] = inverse_softplus(0.07)
+            initial[2] = inverse_softplus(0.09)
         self.raw_shock_scale = nn.Parameter(initial)
         self.raw_drift_scale = nn.Parameter(torch.tensor(-0.6931))
         self.raw_mean_reversion = nn.Parameter(torch.tensor(-0.6931))

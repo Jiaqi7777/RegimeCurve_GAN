@@ -10,13 +10,18 @@ from torch.optim import Adam
 from .data import make_loader, prepare_data
 from .losses import (
     autocorrelation_loss,
+    conditional_factor_spread_loss,
+    correlation_loss,
     covariance_loss,
+    daily_tail_loss,
     diversity_loss,
     economic_curve_features,
     gradient_penalty,
+    level_neutral_shape_covariance_loss,
     moment_loss,
     regime_balance_loss,
     repulsion_loss,
+    shape_repulsion_loss,
     smoothness_loss,
     terminal_factor_loss,
 )
@@ -53,7 +58,10 @@ def validation_score(model: RegimeCurveGAN, loader, device: torch.device) -> flo
         scores.append((
             moment_loss(real_curves, fake_curves)
             + 0.05 * covariance_loss(real_curves, fake_curves)
+            + 0.25 * level_neutral_shape_covariance_loss(real_curves, fake_curves)
+            + 0.25 * correlation_loss(real_curves, fake_curves)
             + 0.10 * autocorrelation_loss(real_curves, fake_curves)
+            + 0.10 * daily_tail_loss(real_curves, fake_curves)
             + terminal_factor_loss(real_curves, fake_curves)
         ).item())
     model.train()
@@ -118,13 +126,26 @@ def train(config: dict) -> Path:
                 generator_loss += cfg["smoothness_weight"] * smoothness_loss(curves)
                 generator_loss += cfg["moment_weight"] * moment_loss(real_expanded_curves, curves)
                 generator_loss += cfg["covariance_weight"] * covariance_loss(real_expanded_curves, curves)
+                generator_loss += cfg["shape_covariance_weight"] * (
+                    level_neutral_shape_covariance_loss(real_expanded_curves, curves)
+                )
+                generator_loss += cfg["correlation_weight"] * correlation_loss(
+                    real_expanded_curves, curves
+                )
                 generator_loss += cfg["autocorrelation_weight"] * autocorrelation_loss(
+                    real_expanded_curves, curves
+                )
+                generator_loss += cfg["daily_tail_weight"] * daily_tail_loss(
                     real_expanded_curves, curves
                 )
                 generator_loss += cfg["terminal_weight"] * terminal_factor_loss(
                     real_expanded_curves, curves
                 )
                 generator_loss += cfg["diversity_weight"] * economic_diversity
+                generator_loss += cfg["conditional_spread_weight"] * conditional_factor_spread_loss(
+                    grouped_curves
+                )
+                generator_loss += cfg["shape_repulsion_weight"] * shape_repulsion_loss(grouped_curves)
                 generator_loss += cfg["information_weight"] * F.mse_loss(recovered_latent, latent)
                 generator_loss += cfg["repulsion_weight"] * repulsion_loss(economic)
                 generator_loss += cfg["regime_balance_weight"] * regime_balance_loss(probabilities)

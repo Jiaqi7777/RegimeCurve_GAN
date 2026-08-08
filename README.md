@@ -7,7 +7,7 @@ The project was designed for scenario generation rather than point forecasting. 
 1. each simulated path should be financially and temporally plausible;
 2. repeated simulations from the same context should produce diverse but credible futures.
 
-The implementation combines a regime-aware conditional Wasserstein GAN, an interpretable Nelson–Siegel factor representation, low-rank residual factors, heavy-tailed hierarchical noise, autoregressive stochastic experts, two specialised critics, latent-information recovery, and explicit moment and covariance matching.
+The implementation combines a regime-aware conditional Wasserstein GAN, an interpretable Nelson–Siegel representation, an orthogonal maturity-spline shape head, heavy-tailed hierarchical noise, autoregressive stochastic experts, two specialised critics, latent-information recovery, and explicit level-neutral shape-covariance matching.
 
 ## Contents
 
@@ -31,7 +31,7 @@ The implementation combines a regime-aware conditional Wasserstein GAN, an inter
 Previous three curves
         │
         ▼
-Nelson–Siegel and residual-factor encoder
+Nelson–Siegel and orthogonal spline encoder
         │
         ▼
 GRU context encoder ───────────────► regime probabilities
@@ -46,7 +46,7 @@ GRU context encoder ───────────────► regime prob
        autoregressive drift and volatility
                         │
                         ▼
-          learnable factor-specific step scales
+       separate drift and factor shock scales
                         │
                         ▼
         differentiable yield-curve reconstruction
@@ -70,7 +70,7 @@ y_t(\tau)
 +\varepsilon_t(\tau).
 \]
 
-The first three coefficients approximately describe level, slope, and curvature. A PCA representation of the Nelson–Siegel residuals retains local maturity effects that a strict three-factor model cannot capture. The default model uses three residual components, giving a six-dimensional latent curve state.
+The first three coefficients approximately describe level, slope, and broad curvature. The remaining residual is represented by six smooth cubic-spline coordinates over log maturity. The spline dictionary is projected onto the orthogonal complement of the Nelson–Siegel span and then orthonormalised. These coordinates therefore cannot reproduce another parallel shift: they must describe local twists, butterflies, and long-end deformations. This replaces residual PCA, whose variance ordering concentrated capacity in a few historically dominant directions. The default latent curve state has nine dimensions.
 
 Both the factor transform and its standardisation statistics are fitted using training data only.
 
@@ -87,17 +87,17 @@ Two types of randomness are supplied to the generator:
 - path-level noise controls the overall ten-day scenario;
 - daily noise introduces local shocks along the simulated path.
 
-This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity. The calibrated defaults use a base scale of `0.75` and regime multipliers `[0.7, 0.9, 1.1, 1.5]`.
+This division encourages coherence across the horizon while avoiding deterministic trajectories. Daily innovations follow a Student-\(t_5\) prior rather than a Gaussian prior. Regime-dependent scales allow calm and stressed scenarios, while factor-specific positive scales let curvature receive larger shocks without injecting independent noise directly into every maturity.
 
 ### 4. Autoregressive stochastic regime experts
 
-Each regime expert is a GRUCell decoder. At every forecast day it consumes the previous latent state, encoded context, path code, and a fresh daily innovation. Separate heads predict drift and conditional volatility. One sampled expert produces the complete scenario, and increments accumulate from the last observed state. Drift and shocks have separate positive scales: drift is capped at `0.03`, while stochastic shocks retain factor-specific amplitudes. A learned mean-reversion term pulls paths gently toward the conditioning state. This controls persistent ten-day trends without removing regime or within-regime diversity.
+Each regime expert is a GRUCell decoder. At every forecast day it consumes the previous latent state, encoded context, path code, and a fresh daily innovation. Separate heads predict drift and conditional volatility. Drift is capped separately, and learned mean reversion prevents persistent ten-day trends. Shock scales are initialised asymmetrically at `0.03` for level, `0.07` for slope, `0.09` for curvature, and `0.08` for each orthogonal spline coordinate. This gives local shape modes enough prior variance to compete with the dominant level factor.
 
-A fixed global multiplier initially produced movements that were systematically too small. It was replaced with positive, learnable, factor-specific shock scales plus a separately constrained drift scale. Level, slope, curvature, and residual factors can consequently learn different stochastic amplitudes without allowing persistent drift to dominate the ten-day outcome.
+A fixed global multiplier was replaced with separate positive drift and shock scales. The calibrated Student-\(t_5\) prior uses a base scale of `0.75` and regime multipliers `[0.7, 0.9, 1.1, 1.5]`.
 
 ### 5. Differentiable curve decoder
 
-The generated latent states are converted back to all 13 maturities using the fitted Nelson–Siegel basis and residual PCA components. Because this reconstruction is implemented in PyTorch, gradients from the curve-level losses and critic pass directly into the generator.
+The generated latent states are converted back to all 13 maturities using the fitted Nelson–Siegel basis and orthogonal cubic-spline basis. Because reconstruction is implemented in PyTorch, gradients from curve-level losses and the shape critic pass directly into the generator. The spline span adds maturity-specific capacity without generating 13 independent noisy yields.
 
 ### 6. Dual critics
 
@@ -111,7 +111,7 @@ The **shape critic** processes yield levels together with first and second diffe
 
 ### Why generate factors rather than yields directly?
 
-Treasury maturities are highly correlated, and most curve variation lies in a small number of economic directions. The factor representation reduces dimensionality, improves sample efficiency, and makes generated scenarios easier to diagnose. Residual PCA components prevent the model from being forced into an exact Nelson–Siegel family.
+Treasury maturities are highly correlated, and most curve variation lies in a small number of economic directions. The factor representation reduces dimensionality, improves sample efficiency, and makes generated scenarios easier to diagnose. Orthogonal spline coordinates prevent the model from being forced into an exact Nelson–Siegel family while reserving their capacity for genuine maturity-relative changes.
 
 ### Why WGAN-GP?
 
@@ -135,7 +135,7 @@ Preprocessing performs the following steps:
 2. remove duplicate dates;
 3. discard the single archive row containing no reported yields;
 4. interpolate missing tenors across maturity within the same date;
-5. fit the Nelson–Siegel and residual-PCA transform on training rows only;
+5. fit the Nelson–Siegel scaling and orthogonal spline-coordinate scaling on training rows only;
 6. construct rolling windows with three context days and ten target days;
 7. assign a window to a split using the final date of its target horizon.
 
@@ -168,6 +168,7 @@ The critics minimise the conditional Wasserstein objectives with gradient penalt
 - **Smoothness loss** penalises excessive second differences across maturity.
 - **Moment loss** matches the mean and volatility of daily yield changes.
 - **Covariance loss** matches the covariance matrix of daily changes across maturities.
+- **Level-neutral shape-covariance loss** matches the covariance of ten-day maturity changes after removing each path's average shift. It directly targets the under-dispersion that makes terminal curves appear parallel.
 - **Economic diversity loss** rewards latent noise that changes level, slope, and curvature, with additional weight on curvature.
 - **Latent-information loss** trains an auxiliary network to recover the path code from the generated scenario, discouraging the generator from ignoring noise.
 - **Within-context repulsion** separates four paths sampled from the same conditioning history.
@@ -181,9 +182,13 @@ The recommended initial weights are:
 smoothness_weight: 0.02
 moment_weight: 1.0
 covariance_weight: 0.05
+shape_covariance_weight: 0.25
+correlation_weight: 0.25
 autocorrelation_weight: 0.10
 terminal_weight: 1.0
 diversity_weight: 0.20
+conditional_spread_weight: 0.10
+shape_repulsion_weight: 0.05
 information_weight: 0.10
 repulsion_weight: 0.05
 regime_balance_weight: 0.01
@@ -251,7 +256,7 @@ uv run regimecurve-evaluate \
   --output-dir outputs/evaluation
 ```
 
-The evaluation directory contains summary metrics, non-overlapping conditional historical neighbours, terminal curves, full factor paths, terminal factor boxplots, a maturity-wise historical envelope, and a PCA representativeness map. The PCA plot answers a different question from diversity: generated points should cover the historical cloud rather than collapse to its centre or sit far outside it.
+The evaluation directory contains terminal curves, conditional factor paths, maturity-wise envelopes, level-neutral shape changes, PCA representativeness for PC1–PC4, daily correlation heatmaps, and level-neutral shape-covariance heatmaps. Only 20 paths are drawn in crowded plots, while every generated scenario is retained for metrics. The report also compares results using 100 and 250 non-overlapping historical neighbours and measures maturity-specific 5–95% coverage and PC spread ratios.
 
 ## Reproducing results
 
@@ -291,7 +296,6 @@ Realism and diversity are evaluated separately.
 - level, slope, and curvature distributions;
 - cross-maturity correlation and covariance matrices;
 - lag-one autocorrelation;
-- terminal factor means, standard deviations, and 5th/50th/95th percentiles;
 - PCA eigenvalue spectrum;
 - continuity between the last context day and first generated day;
 - maximum daily movement and path roughness.
@@ -303,7 +307,6 @@ Realism and diversity are evaluated separately.
 - dispersion of level, slope, and curvature;
 - sensitivity of generated paths to latent noise;
 - expert usage and regime entropy.
-- nearest-historical-neighbour percentiles in the full maturity-change space.
 
 Generating only ten scenarios gives a useful visualisation but an unstable estimate of tail behaviour. Quantitative evaluation should use at least 100 scenarios per test context, even though the submitted example contains the ten scenarios requested by the task.
 

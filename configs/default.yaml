@@ -5,7 +5,7 @@ data:
   horizon_days: 10
   train_end: "2017-12-31"
   validation_end: "2020-12-31"
-  residual_components: 3
+  residual_components: 6
   nelson_siegel_lambda: 0.7308
 model:
   latent_dim: 16
@@ -27,9 +27,14 @@ training:
   smoothness_weight: 0.01
   moment_weight: 1.0
   covariance_weight: 0.05
+  shape_covariance_weight: 0.25
+  correlation_weight: 0.25
   autocorrelation_weight: 0.10
+  daily_tail_weight: 0.10
   terminal_weight: 1.0
   diversity_weight: 0.20
+  conditional_spread_weight: 0.10
+  shape_repulsion_weight: 0.05
   information_weight: 0.10
   repulsion_weight: 0.05
   regime_balance_weight: 0.01

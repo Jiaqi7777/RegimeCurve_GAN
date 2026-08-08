@@ -16,92 +16,77 @@ FACTOR_NAMES = ["Level (10Y)", "Slope (10Y-2Y)", "Curvature (2x5Y-2Y-10Y)"]
 
 
 def curve_factors(curves: np.ndarray, columns: list[str]) -> np.ndarray:
-    index = {column: position for position, column in enumerate(columns)}
-    required = {"2 Yr", "5 Yr", "10 Yr"}
-    if not required.issubset(index):
-        raise ValueError(f"Factor diagnostics require columns {sorted(required)}")
+    index = {name: i for i, name in enumerate(columns)}
     two, five, ten = (curves[..., index[name]] for name in ("2 Yr", "5 Yr", "10 Yr"))
-    return np.stack([ten, ten - two, 2.0 * five - two - ten], axis=-1)
+    return np.stack([ten, ten - two, 2 * five - two - ten], axis=-1)
 
 
 def conditional_neighbours(hist: np.ndarray, columns: list[str], horizon: int,
-                           context_days: int = 3, neighbours: int = 250,
-                           minimum_separation: int | None = None
+                           neighbours: int = 250, context_days: int = 3
                            ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     factors = curve_factors(hist, columns)
     starts = np.arange(context_days - 1, len(hist) - horizon)
-    recent_volatility = np.array([
+    volatility = np.array([
         np.diff(hist[i - context_days + 1:i + 1], axis=0).std() for i in starts
     ])
-    candidate_features = np.column_stack([factors[starts], recent_volatility])
-    current_features = np.r_[factors[-1], np.diff(hist[-context_days:], axis=0).std()]
-    scale = candidate_features.std(axis=0)
+    features = np.column_stack([factors[starts], volatility])
+    current = np.r_[factors[-1], np.diff(hist[-context_days:], axis=0).std()]
+    scale = features.std(0)
     scale[scale < 1e-8] = 1.0
-    distances = np.linalg.norm((candidate_features - current_features) / scale, axis=1)
-    separation = horizon if minimum_separation is None else minimum_separation
-    selected_positions = []
+    distances = np.linalg.norm((features - current) / scale, axis=1)
+    selected = []
     for position in np.argsort(distances):
-        candidate = starts[position]
-        if all(abs(candidate - starts[chosen]) >= separation for chosen in selected_positions):
-            selected_positions.append(position)
-            if len(selected_positions) == neighbours:
+        if all(abs(starts[position] - starts[other]) >= horizon for other in selected):
+            selected.append(position)
+            if len(selected) == neighbours:
                 break
-    chosen = np.asarray(selected_positions, dtype=int)
-    selected_starts = starts[chosen]
-    paths = np.stack([
+    selected = np.asarray(selected)
+    selected_starts = starts[selected]
+    factor_paths = np.stack([
         factors[start + 1:start + horizon + 1] - factors[start] for start in selected_starts
     ])
-    return selected_starts, distances[chosen], paths
+    return selected_starts, distances[selected], factor_paths
 
 
-def factor_path_plot(generated_changes: np.ndarray, historical_changes: np.ndarray,
-                     output: Path) -> None:
-    horizon = generated_changes.shape[1]
-    days = np.arange(horizon + 1)
-    generated = np.concatenate([
-        np.zeros((generated_changes.shape[0], 1, 3)), generated_changes
-    ], axis=1) * 100.0
-    historical = np.concatenate([
-        np.zeros((historical_changes.shape[0], 1, 3)), historical_changes
-    ], axis=1) * 100.0
-    quantiles = np.quantile(historical, [0.05, 0.25, 0.50, 0.75, 0.95], axis=0)
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8), sharex=True)
+def _display_indices(count: int, maximum: int = 20) -> np.ndarray:
+    return np.linspace(0, count - 1, min(count, maximum), dtype=int)
+
+
+def plot_factor_paths(generated: np.ndarray, historical: np.ndarray, output: Path) -> None:
+    days = np.arange(generated.shape[1] + 1)
+    generated = np.concatenate([np.zeros((len(generated), 1, 3)), generated], axis=1) * 100
+    historical = np.concatenate([np.zeros((len(historical), 1, 3)), historical], axis=1) * 100
+    q = np.quantile(historical, [0.05, 0.25, 0.5, 0.75, 0.95], axis=0)
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.8))
     for factor, axis in enumerate(axes):
-        axis.fill_between(days, quantiles[0, :, factor], quantiles[4, :, factor],
-                          color="steelblue", alpha=0.15, label="historical 5–95%")
-        axis.fill_between(days, quantiles[1, :, factor], quantiles[3, :, factor],
-                          color="steelblue", alpha=0.28, label="historical 25–75%")
-        axis.plot(days, quantiles[2, :, factor], color="steelblue", linestyle="--",
-                  linewidth=1.5, label="historical median")
-        for scenario in range(generated.shape[0]):
-            axis.plot(days, generated[scenario, :, factor], alpha=0.65, linewidth=1.2,
-                      label="generated" if scenario == 0 else None)
-        axis.axhline(0, color="black", linewidth=0.7)
+        axis.fill_between(days, q[0, :, factor], q[4, :, factor], color="steelblue", alpha=.15,
+                          label="historical 5–95%")
+        axis.fill_between(days, q[1, :, factor], q[3, :, factor], color="steelblue", alpha=.28,
+                          label="historical 25–75%")
+        axis.plot(days, q[2, :, factor], "--", color="steelblue", label="historical median")
+        for j, scenario in enumerate(_display_indices(len(generated))):
+            axis.plot(days, generated[scenario, :, factor], alpha=.65,
+                      label="generated (20 shown)" if j == 0 else None)
+        axis.axhline(0, color="black", linewidth=.7)
         axis.set(title=FACTOR_NAMES[factor], xlabel="Forecast business day", ylabel="Change (bp)")
-        axis.grid(alpha=0.2)
+        axis.grid(alpha=.2)
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.02),
-               ncol=4, frameon=False)
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(.5, 1.02), ncol=4, frameon=False)
     fig.suptitle("Generated factor paths versus conditionally similar history", y=1.10)
     fig.tight_layout()
     fig.savefig(output / "factor_paths_conditional.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
-def terminal_comparison_plot(generated_terminal: np.ndarray, historical_terminal: np.ndarray,
-                             output: Path) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+def plot_terminal_factors(generated: np.ndarray, historical: np.ndarray, output: Path) -> None:
     rng = np.random.default_rng(42)
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
     for factor, axis in enumerate(axes):
-        historical_bp = historical_terminal[:, factor] * 100.0
-        generated_bp = generated_terminal[:, factor] * 100.0
-        axis.boxplot(historical_bp, widths=0.45, showfliers=False)
-        axis.scatter(rng.normal(1.0, 0.025, len(generated_bp)), generated_bp,
-                     color="darkorange", edgecolor="black", s=35, zorder=3,
-                     label="generated scenarios")
-        axis.set_xticks([])
-        axis.set(title=FACTOR_NAMES[factor], ylabel="10-day change (bp)")
-        axis.grid(axis="y", alpha=0.2)
+        axis.boxplot(historical[:, factor] * 100, showfliers=False)
+        axis.scatter(rng.normal(1, .025, len(generated)), generated[:, factor] * 100,
+                     color="darkorange", edgecolor="black", s=32, label="generated scenarios")
+        axis.set(xticks=[], title=FACTOR_NAMES[factor], ylabel="10-day change (bp)")
+        axis.grid(axis="y", alpha=.2)
     axes[0].legend(frameon=False)
     fig.suptitle("Generated terminal changes versus conditional historical distribution")
     fig.tight_layout()
@@ -109,95 +94,173 @@ def terminal_comparison_plot(generated_terminal: np.ndarray, historical_terminal
     plt.close(fig)
 
 
-def maturity_envelope_plot(generated_changes: np.ndarray, historical_changes: np.ndarray,
+def plot_maturity_envelope(generated: np.ndarray, historical: np.ndarray,
                            columns: list[str], output: Path) -> None:
-    quantiles = np.quantile(historical_changes * 100.0, [0.05, 0.25, 0.50, 0.75, 0.95], axis=0)
     x = np.arange(len(columns))
+    q = np.quantile(historical * 100, [.05, .25, .5, .75, .95], axis=0)
     fig, axis = plt.subplots(figsize=(11, 5.5))
-    axis.fill_between(x, quantiles[0], quantiles[4], color="steelblue", alpha=0.16,
-                      label="historical 5–95%")
-    axis.fill_between(x, quantiles[1], quantiles[3], color="steelblue", alpha=0.30,
-                      label="historical 25–75%")
-    axis.plot(x, quantiles[2], color="steelblue", linestyle="--", label="historical median")
-    for scenario, curve in enumerate(generated_changes * 100.0):
-        axis.plot(x, curve, alpha=0.65, linewidth=1.3,
-                  label="generated" if scenario == 0 else None)
-    axis.axhline(0, color="black", linewidth=0.7)
-    axis.set(xticks=x, xticklabels=columns, ylabel="10-day yield change (bp)",
-             xlabel="Maturity", title="Generated changes within conditional historical envelopes")
+    axis.fill_between(x, q[0], q[4], color="steelblue", alpha=.15, label="historical 5–95%")
+    axis.fill_between(x, q[1], q[3], color="steelblue", alpha=.28, label="historical 25–75%")
+    axis.plot(x, q[2], "--", color="steelblue", label="historical median")
+    for j, scenario in enumerate(_display_indices(len(generated))):
+        axis.plot(x, generated[scenario] * 100, alpha=.65,
+                  label="generated (20 shown)" if j == 0 else None)
+    axis.axhline(0, color="black", linewidth=.7)
+    axis.set(xticks=x, xticklabels=columns, xlabel="Maturity", ylabel="10-day change (bp)",
+             title="Generated changes within conditional historical envelopes")
     axis.tick_params(axis="x", rotation=45)
     axis.legend(ncol=2, frameon=False)
-    axis.grid(axis="y", alpha=0.2)
     fig.tight_layout()
     fig.savefig(output / "maturity_change_envelope.png", dpi=180)
     plt.close(fig)
 
 
+def plot_level_neutral_changes(generated: np.ndarray, historical: np.ndarray,
+                               columns: list[str], output: Path) -> None:
+    """Expose twists and butterflies hidden by the dominant parallel shift."""
+    generated = generated - generated.mean(axis=-1, keepdims=True)
+    historical = historical - historical.mean(axis=-1, keepdims=True)
+    x = np.arange(len(columns))
+    q = np.quantile(historical * 100, [.05, .25, .5, .75, .95], axis=0)
+    fig, axis = plt.subplots(figsize=(11, 5.5))
+    axis.fill_between(x, q[0], q[4], color="mediumpurple", alpha=.14,
+                      label="historical 5–95%")
+    axis.fill_between(x, q[1], q[3], color="mediumpurple", alpha=.28,
+                      label="historical 25–75%")
+    axis.plot(x, q[2], "--", color="indigo", label="historical median")
+    for j, scenario in enumerate(_display_indices(len(generated))):
+        axis.plot(x, generated[scenario] * 100, alpha=.68,
+                  label="generated (20 shown)" if j == 0 else None)
+    axis.axhline(0, color="black", linewidth=.7)
+    axis.set(xticks=x, xticklabels=columns, xlabel="Maturity",
+             ylabel="Level-neutral 10-day change (bp)",
+             title="Shape diversity after removing each scenario's parallel shift")
+    axis.tick_params(axis="x", rotation=45)
+    axis.legend(ncol=2, frameon=False)
+    fig.tight_layout()
+    fig.savefig(output / "level_neutral_shape_changes.png", dpi=180)
+    plt.close(fig)
+
+
 def nearest_neighbour_percentiles(historical: np.ndarray, generated: np.ndarray) -> np.ndarray:
-    centre = historical.mean(axis=0)
-    scale = historical.std(axis=0)
-    scale[scale < 1e-8] = 1.0
-    hist_standard = (historical - centre) / scale
-    gen_standard = (generated - centre) / scale
-    hist_distances = np.linalg.norm(hist_standard[:, None] - hist_standard[None, :], axis=-1)
-    np.fill_diagonal(hist_distances, np.inf)
-    reference = hist_distances.min(axis=1)
-    generated_nearest = np.linalg.norm(
-        gen_standard[:, None] - hist_standard[None, :], axis=-1
-    ).min(axis=1)
+    centre, scale = historical.mean(0), historical.std(0)
+    scale[scale < 1e-8] = 1
+    historical = (historical - centre) / scale
+    generated = (generated - centre) / scale
+    historical_distances = np.linalg.norm(historical[:, None] - historical[None], axis=-1)
+    np.fill_diagonal(historical_distances, np.inf)
+    reference = historical_distances.min(1)
+    generated_nearest = np.linalg.norm(generated[:, None] - historical[None], axis=-1).min(1)
     return np.array([(reference <= distance).mean() for distance in generated_nearest])
 
 
-def representativeness_pca_plot(historical: np.ndarray, generated: np.ndarray,
-                                output: Path) -> np.ndarray:
+def plot_pca(historical: np.ndarray, generated: np.ndarray, output: Path) -> tuple[np.ndarray, list[float]]:
     centre, scale = historical.mean(0), historical.std(0)
-    scale[scale < 1e-8] = 1.0
-    historical_standard = (historical - centre) / scale
-    generated_standard = (generated - centre) / scale
-    pca = PCA(n_components=2).fit(historical_standard)
-    historical_scores = pca.transform(historical_standard)
-    generated_scores = pca.transform(generated_standard)
-    fig, axis = plt.subplots(figsize=(8, 6))
-    axis.scatter(historical_scores[:, 0], historical_scores[:, 1], s=22, alpha=0.35,
-                 color="steelblue", label="conditional historical episodes")
-    axis.scatter(generated_scores[:, 0], generated_scores[:, 1], s=70, color="darkorange",
-                 edgecolor="black", label="generated scenarios", zorder=3)
-    covariance = np.cov(historical_scores.T)
+    scale[scale < 1e-8] = 1
+    historical_z, generated_z = (historical - centre) / scale, (generated - centre) / scale
+    component_count = min(4, historical.shape[1])
+    pca = PCA(n_components=component_count).fit(historical_z)
+    hist_score, gen_score = pca.transform(historical_z), pca.transform(generated_z)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    axis = axes[0]
+    axis.scatter(hist_score[:, 0], hist_score[:, 1], alpha=.3, s=22, label="conditional history")
+    axis.scatter(gen_score[:, 0], gen_score[:, 1], color="darkorange", edgecolor="black",
+                 s=55, label="generated", zorder=3)
+    covariance = np.cov(hist_score.T)
     values, vectors = np.linalg.eigh(covariance)
     order = values.argsort()[::-1]
     values, vectors = values[order], vectors[:, order]
     angle = np.degrees(np.arctan2(vectors[1, 0], vectors[0, 0]))
-    radius = np.sqrt(4.605)  # 90% chi-square radius in two dimensions
-    ellipse = Ellipse(historical_scores.mean(0), 2 * radius * np.sqrt(values[0]),
-                      2 * radius * np.sqrt(values[1]), angle=angle, fill=False,
-                      color="navy", linewidth=2, linestyle="--", label="historical 90% ellipse")
-    axis.add_patch(ellipse)
-    axis.axhline(0, color="grey", linewidth=0.6)
-    axis.axvline(0, color="grey", linewidth=0.6)
-    axis.set(
-        xlabel=f"PC1 ({pca.explained_variance_ratio_[0]:.0%} variance)",
-        ylabel=f"PC2 ({pca.explained_variance_ratio_[1]:.0%} variance)",
-        title="Representativeness of generated 10-day curve changes",
-    )
+    radius = np.sqrt(4.605)
+    axis.add_patch(Ellipse(hist_score.mean(0), 2 * radius * np.sqrt(values[0]),
+                           2 * radius * np.sqrt(values[1]), angle=angle, fill=False,
+                           color="navy", linestyle="--", linewidth=2, label="historical 90% ellipse"))
+    axis.set(xlabel=f"PC1 ({pca.explained_variance_ratio_[0]:.0%})",
+             ylabel=f"PC2 ({pca.explained_variance_ratio_[1]:.0%})",
+             title="Representativeness and shape diversity")
+    axis.axhline(0, color="grey", linewidth=.5)
+    axis.axvline(0, color="grey", linewidth=.5)
     axis.legend(frameon=False)
-    axis.grid(alpha=0.15)
+    axis = axes[1]
+    axis.scatter(hist_score[:, 2], hist_score[:, 3], alpha=.3, s=22,
+                 label="conditional history")
+    axis.scatter(gen_score[:, 2], gen_score[:, 3], color="darkorange", edgecolor="black",
+                 s=55, label="generated", zorder=3)
+    axis.set(xlabel=f"PC3 ({pca.explained_variance_ratio_[2]:.0%})",
+             ylabel=f"PC4 ({pca.explained_variance_ratio_[3]:.0%})",
+             title="Local twists and butterflies")
+    axis.axhline(0, color="grey", linewidth=.5)
+    axis.axvline(0, color="grey", linewidth=.5)
+    axis.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(output / "representativeness_pca.png", dpi=180)
     plt.close(fig)
-    return nearest_neighbour_percentiles(historical, generated)
+    spread_ratio = (gen_score.std(0) / hist_score.std(0).clip(1e-8)).tolist()
+    return nearest_neighbour_percentiles(historical, generated), spread_ratio
 
 
-def terminal_curve_plot(generated: pd.DataFrame, hist: np.ndarray, columns: list[str],
-                        output: Path) -> None:
-    terminal = generated[generated["day"] == generated["day"].max()]
+def plot_shape_covariance_heatmaps(historical: np.ndarray, generated: np.ndarray,
+                                   columns: list[str], output: Path) -> float:
+    historical = historical - historical.mean(axis=-1, keepdims=True)
+    generated = generated - generated.mean(axis=-1, keepdims=True)
+    historical_covariance = np.cov((historical * 100).T)
+    generated_covariance = np.cov((generated * 100).T)
+    difference = np.abs(historical_covariance - generated_covariance)
+    limit = max(np.abs(historical_covariance).max(), np.abs(generated_covariance).max())
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5))
+    for axis, matrix, title, limits in zip(
+        axes, [historical_covariance, generated_covariance, difference],
+        ["Historical shape covariance", "Generated shape covariance", "Absolute difference"],
+        [(-limit, limit), (-limit, limit), (0, difference.max())], strict=True,
+    ):
+        image = axis.imshow(matrix, cmap="coolwarm" if limits[0] < 0 else "magma",
+                            vmin=limits[0], vmax=limits[1])
+        axis.set(xticks=range(len(columns)), yticks=range(len(columns)),
+                 xticklabels=columns, yticklabels=columns, title=title)
+        axis.tick_params(axis="x", rotation=90, labelsize=7)
+        axis.tick_params(axis="y", labelsize=7)
+        fig.colorbar(image, ax=axis, fraction=.046)
+    fig.suptitle("Level-neutral 10-day shape covariance (bp²)")
+    fig.tight_layout()
+    fig.savefig(output / "shape_covariance_heatmaps.png", dpi=180)
+    plt.close(fig)
+    return float(np.linalg.norm(historical_covariance - generated_covariance, ord="fro"))
+
+
+def plot_correlation_heatmaps(historical_changes: np.ndarray, generated_changes: np.ndarray,
+                              columns: list[str], output: Path) -> float:
+    historical = np.corrcoef(historical_changes.reshape(-1, len(columns)).T)
+    generated = np.corrcoef(generated_changes.reshape(-1, len(columns)).T)
+    difference = np.abs(historical - generated)
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5))
+    for axis, matrix, title, limits in zip(
+        axes, [historical, generated, difference],
+        ["Historical correlation", "Generated correlation", "Absolute difference"],
+        [(-1, 1), (-1, 1), (0, 1)], strict=True,
+    ):
+        image = axis.imshow(matrix, cmap="coolwarm" if limits[0] < 0 else "magma",
+                            vmin=limits[0], vmax=limits[1])
+        axis.set(xticks=range(len(columns)), yticks=range(len(columns)),
+                 xticklabels=columns, yticklabels=columns, title=title)
+        axis.tick_params(axis="x", rotation=90, labelsize=7)
+        axis.tick_params(axis="y", labelsize=7)
+        fig.colorbar(image, ax=axis, fraction=.046)
+    fig.suptitle("Daily-change cross-maturity correlation")
+    fig.tight_layout()
+    fig.savefig(output / "correlation_heatmaps.png", dpi=180)
+    plt.close(fig)
+    return float(np.linalg.norm(historical - generated, ord="fro"))
+
+
+def plot_terminal_curves(paths: np.ndarray, latest: np.ndarray, columns: list[str], output: Path) -> None:
     fig, axis = plt.subplots(figsize=(10, 5))
-    axis.plot(columns, hist[-1], color="black", linewidth=2.5, label="last observed")
-    for scenario, row in terminal.groupby("scenario"):
-        axis.plot(columns, row.iloc[0][columns].to_numpy(float), alpha=0.55,
-                  label="generated" if scenario == 0 else None)
-    axis.set(title="Generated 10-day terminal yield curves", ylabel="Yield (%)", xlabel="Maturity")
+    axis.plot(columns, latest, color="black", linewidth=2.5, label="last observed")
+    for j, scenario in enumerate(_display_indices(len(paths), maximum=30)):
+        axis.plot(columns, paths[scenario, -1], alpha=.55,
+                  label="generated (30 shown)" if j == 0 else None)
+    axis.set(title="Generated 10-day terminal yield curves", xlabel="Maturity", ylabel="Yield (%)")
     axis.tick_params(axis="x", rotation=45)
-    axis.legend()
+    axis.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(output / "terminal_curves.png", dpi=180)
     plt.close(fig)
@@ -206,90 +269,83 @@ def terminal_curve_plot(generated: pd.DataFrame, hist: np.ndarray, columns: list
 def evaluate(generated_path: str, historical_path: str, output_dir: str,
              neighbours: int = 250) -> dict:
     generated = pd.read_csv(generated_path).sort_values(["scenario", "day"])
-    columns = [column for column in generated.columns if column not in {"scenario", "day"}]
+    columns = [name for name in generated.columns if name not in {"scenario", "day"}]
     historical_frame = load_curves(historical_path)[columns]
     hist = historical_frame.to_numpy(float)
-    horizon = int(generated["day"].max())
-    scenario_ids = sorted(generated["scenario"].unique())
-    generated_paths = np.stack([
-        generated[generated["scenario"] == scenario][columns].to_numpy(float)
-        for scenario in scenario_ids
-    ])
-    generated_factors = curve_factors(generated_paths, columns)
-    starting_factors = curve_factors(hist[-1][None], columns)[0]
-    generated_factor_changes = generated_factors - starting_factors
-    starts, distances, historical_factor_changes = conditional_neighbours(
-        hist, columns, horizon, neighbours=neighbours
+    scenarios = sorted(generated.scenario.unique())
+    paths = np.stack([generated[generated.scenario == s][columns].to_numpy(float) for s in scenarios])
+    horizon = paths.shape[1]
+    starts, distances, historical_factor_paths = conditional_neighbours(
+        hist, columns, horizon, neighbours
     )
-    generated_terminal = generated_factor_changes[:, -1]
-    historical_terminal = historical_factor_changes[:, -1]
+    generated_factor_paths = curve_factors(paths, columns) - curve_factors(hist[-1:], columns)[0]
     historical_curve_changes = np.stack([hist[start + horizon] - hist[start] for start in starts])
-    generated_curve_changes = generated_paths[:, -1] - hist[-1]
-    lower, median, upper = np.quantile(historical_terminal, [0.05, 0.50, 0.95], axis=0)
-    outside_by_factor = ((generated_terminal < lower) | (generated_terminal > upper)).mean(axis=0)
-    outside_any = ((generated_terminal < lower) | (generated_terminal > upper)).any(axis=1).mean()
-    full_paths = np.concatenate([hist[-1][None, None].repeat(len(scenario_ids), axis=0),
-                                 generated_paths], axis=1)
-    generated_daily_changes = np.diff(full_paths, axis=1)
-    historical_daily_changes = np.diff(hist, axis=0)
-    maximum_jump = np.abs(generated_daily_changes).max(axis=(1, 2)) * 100.0
-    terminal_curve_std = generated_paths[:, -1].std(axis=0) * 100.0
+    generated_curve_changes = paths[:, -1] - hist[-1]
+    generated_terminal, historical_terminal = generated_factor_paths[:, -1], historical_factor_paths[:, -1]
+    lower, median, upper = np.quantile(historical_terminal, [.05, .5, .95], axis=0)
+    outside = (generated_terminal < lower) | (generated_terminal > upper)
+    historical_daily = np.stack([np.diff(hist[start:start + horizon + 1], axis=0) for start in starts])
+    generated_daily = np.diff(np.concatenate([np.repeat(hist[-1][None, None], len(paths), axis=0), paths], axis=1), axis=1)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    representativeness_percentiles = representativeness_pca_plot(
-        historical_curve_changes, generated_curve_changes, output
+    representative, pca_spread_ratio = plot_pca(historical_curve_changes, generated_curve_changes, output)
+    correlation_error = plot_correlation_heatmaps(historical_daily, generated_daily, columns, output)
+    shape_covariance_error = plot_shape_covariance_heatmaps(
+        historical_curve_changes, generated_curve_changes, columns, output
     )
-    warnings = []
-    if outside_any > 0.20:
-        warnings.append(
-            f"{outside_any:.0%} of scenarios fall outside at least one conditional 5–95% factor range."
-        )
-    if maximum_jump.max() > 25.0:
-        warnings.append(
-            f"The largest one-day maturity move is {maximum_jump.max():.1f} bp; inspect path realism."
-        )
-    if terminal_curve_std.mean() < 5.0:
-        warnings.append("Mean terminal dispersion is below 5 bp; possible conditional mode collapse.")
-    if (representativeness_percentiles > 0.95).mean() > 0.20:
-        warnings.append("More than 20% of scenarios are less representative than 95% of historical episodes.")
+    maturity_lower, maturity_upper = np.quantile(historical_curve_changes, [.05, .95], axis=0)
+    maturity_outside = ((generated_curve_changes < maturity_lower)
+                        | (generated_curve_changes > maturity_upper)).mean(axis=0)
+    sensitivity = {}
+    for count in (100, min(250, len(starts))):
+        lo, hi = np.quantile(historical_factor_paths[:count, -1], [.05, .95], axis=0)
+        sensitivity[str(count)] = float(((generated_terminal < lo) | (generated_terminal > hi)).any(1).mean())
     metrics = {
         "conditional_neighbours": len(starts),
-        "minimum_historical_start_separation_days": horizon,
-        "conditional_neighbour_distance_mean": float(distances.mean()),
         "terminal_factor_change_bp": {
-            name: {
-                "generated_mean": float(generated_terminal[:, i].mean() * 100.0),
-                "generated_std": float(generated_terminal[:, i].std() * 100.0),
-                "historical_p05": float(lower[i] * 100.0),
-                "historical_median": float(median[i] * 100.0),
-                "historical_p95": float(upper[i] * 100.0),
-                "generated_outside_5_95_fraction": float(outside_by_factor[i]),
-            } for i, name in enumerate(FACTOR_NAMES)
+            name: {"generated_mean": float(generated_terminal[:, i].mean() * 100),
+                   "generated_std": float(generated_terminal[:, i].std() * 100),
+                   "historical_p05": float(lower[i] * 100), "historical_median": float(median[i] * 100),
+                   "historical_p95": float(upper[i] * 100),
+                   "outside_fraction": float(outside[:, i].mean())}
+            for i, name in enumerate(FACTOR_NAMES)
         },
-        "generated_outside_any_factor_5_95_fraction": float(outside_any),
-        "representativeness_nearest_neighbour_percentiles": [
-            float(value) for value in representativeness_percentiles
-        ],
-        "generated_less_representative_than_95pct_fraction": float(
-            (representativeness_percentiles > 0.95).mean()
-        ),
-        "mean_terminal_curve_dispersion_bp": float(terminal_curve_std.mean()),
-        "mean_absolute_daily_move_bp": float(np.abs(generated_daily_changes).mean() * 100.0),
-        "maximum_daily_move_bp": float(maximum_jump.max()),
-        "correlation_matrix_error": float(np.linalg.norm(
-            np.corrcoef(generated_daily_changes.reshape(-1, len(columns)).T)
-            - np.corrcoef(historical_daily_changes.T), ord="fro"
-        )),
-        "warnings": warnings,
+        "outside_any_factor_fraction": float(outside.any(1).mean()),
+        "outside_any_factor_sensitivity_by_neighbours": sensitivity,
+        "maturity_outside_5_95_fraction": {
+            name: float(value) for name, value in zip(columns, maturity_outside, strict=True)
+        },
+        "pca_generated_to_historical_spread_ratio": {
+            f"PC{i + 1}": float(value) for i, value in enumerate(pca_spread_ratio)
+        },
+        "representativeness_percentiles": [float(x) for x in representative],
+        "less_representative_than_95pct_fraction": float((representative > .95).mean()),
+        "mean_terminal_curve_dispersion_bp": float(paths[:, -1].std(0).mean() * 100),
+        "mean_absolute_daily_move_bp": float(np.abs(generated_daily).mean() * 100),
+        "maximum_daily_move_bp": float(np.abs(generated_daily).max() * 100),
+        "correlation_matrix_error": correlation_error,
+        "level_neutral_shape_covariance_error": shape_covariance_error,
     }
+    warnings = []
+    if metrics["outside_any_factor_fraction"] > .2:
+        warnings.append("More than 20% of scenarios fall outside conditional factor ranges.")
+    if pca_spread_ratio[1] < .5:
+        warnings.append("Generated PC2 spread is below 50% of history; possible shape under-dispersion.")
+    if correlation_error > 2.0:
+        warnings.append("Cross-maturity correlation error remains high.")
+    if metrics["maximum_daily_move_bp"] > 25.0:
+        warnings.append("At least one generated daily maturity move exceeds 25 bp.")
+    if max(maturity_outside) > .25:
+        warnings.append("At least one maturity has more than 25% of scenarios outside its 5–95% range.")
+    metrics["warnings"] = warnings
     save_json(metrics, output / "metrics.json")
-    pd.DataFrame({
-        "start_date": historical_frame.index[starts].astype(str), "distance": distances,
-    }).to_csv(output / "conditional_neighbours.csv", index=False)
-    factor_path_plot(generated_factor_changes, historical_factor_changes, output)
-    terminal_comparison_plot(generated_terminal, historical_terminal, output)
-    maturity_envelope_plot(generated_curve_changes, historical_curve_changes, columns, output)
-    terminal_curve_plot(generated, hist, columns, output)
+    pd.DataFrame({"start_date": historical_frame.index[starts].astype(str),
+                  "distance": distances}).to_csv(output / "conditional_neighbours.csv", index=False)
+    plot_factor_paths(generated_factor_paths, historical_factor_paths, output)
+    plot_terminal_factors(generated_terminal, historical_terminal, output)
+    plot_maturity_envelope(generated_curve_changes, historical_curve_changes, columns, output)
+    plot_level_neutral_changes(generated_curve_changes, historical_curve_changes, columns, output)
+    plot_terminal_curves(paths, hist[-1], columns, output)
     return metrics
 
 
