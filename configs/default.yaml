@@ -27,18 +27,19 @@ training:
   smoothness_weight: 0.01
   moment_weight: 1.0
   covariance_weight: 0.05
-  shape_covariance_weight: 0.40
-  whitened_shape_weight: 0.25
+  shape_covariance_weight: 0.75
+  whitened_shape_weight: 0.10
+  shape_trace_weight: 0.50
   correlation_weight: 0.25
   autocorrelation_weight: 0.10
   daily_tail_weight: 0.10
   terminal_weight: 1.0
   diversity_weight: 0.20
-  conditional_spread_weight: 0.15
+  conditional_spread_weight: 0.20
   shape_repulsion_weight: 0.05
   information_weight: 0.10
   repulsion_weight: 0.05
   regime_balance_weight: 0.01
-  paths_per_context: 4
+  paths_per_context: 8
   num_workers: 0
 output_dir: outputs

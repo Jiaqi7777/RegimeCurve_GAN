@@ -14,6 +14,9 @@ from regimecurve.losses import (
     shape_repulsion_loss,
     terminal_factor_loss,
     whitened_shape_covariance_loss,
+    within_context_shape_covariance_loss,
+    within_context_shape_trace_loss,
+    within_context_whitened_shape_loss,
 )
 from regimecurve.model import RegimeGenerator, ShapeCritic, TemporalCritic
 
@@ -72,5 +75,9 @@ def test_calibration_losses_are_zero_for_identical_paths():
 
 def test_conditional_shape_losses_are_finite():
     grouped = torch.randn(8, 4, 10, 13)
+    real = torch.randn(8, 10, 13)
     assert torch.isfinite(conditional_factor_spread_loss(grouped))
     assert torch.isfinite(shape_repulsion_loss(grouped))
+    assert torch.isfinite(within_context_shape_covariance_loss(real, grouped))
+    assert torch.isfinite(within_context_whitened_shape_loss(real, grouped))
+    assert torch.isfinite(within_context_shape_trace_loss(real, grouped))

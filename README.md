@@ -170,8 +170,9 @@ The critics minimise the conditional Wasserstein objectives with gradient penalt
 - **Smoothness loss** penalises excessive second differences across maturity.
 - **Moment loss** matches the mean and volatility of daily yield changes.
 - **Covariance loss** matches the covariance matrix of daily changes across maturities.
-- **Level-neutral shape-covariance loss** matches the covariance of ten-day maturity changes after removing each path's average shift. It directly targets the under-dispersion that makes terminal curves appear parallel.
-- **Whitened shape-covariance loss** diagonalises historical level-neutral covariance and scales each of its first six modes to unit variance before matching. Consequently, a historically small PC4 butterfly receives the same numerical importance as a large PC1 slope mode.
+- **Within-context shape-covariance loss** generates eight futures from each context, removes that context's generated mean shape, and matches the remaining covariance to historical ten-day shape covariance. Between-context changes can no longer satisfy a loss intended to measure stochastic scenario diversity.
+- **Within-context whitened shape loss** diagonalises historical level-neutral covariance and scales each of its first six modes to unit variance before matching same-context generated residuals. Consequently, a historically small PC4 butterfly remains visible to the objective without dominating total variance calibration.
+- **Shape-trace loss** separately matches total level-neutral covariance energy. This prevents good PC4 coverage from concealing severe under-dispersion in the historically dominant shape mode.
 - **Economic diversity loss** rewards latent noise that changes level, slope, and curvature, with additional weight on curvature.
 - **Latent-information loss** trains an auxiliary network to recover the path code from the generated scenario, discouraging the generator from ignoring noise.
 - **Within-context repulsion** separates four paths sampled from the same conditioning history.
@@ -185,18 +186,19 @@ The recommended initial weights are:
 smoothness_weight: 0.02
 moment_weight: 1.0
 covariance_weight: 0.05
-shape_covariance_weight: 0.40
-whitened_shape_weight: 0.25
+shape_covariance_weight: 0.75
+whitened_shape_weight: 0.10
+shape_trace_weight: 0.50
 correlation_weight: 0.25
 autocorrelation_weight: 0.10
 terminal_weight: 1.0
 diversity_weight: 0.20
-conditional_spread_weight: 0.15
+conditional_spread_weight: 0.20
 shape_repulsion_weight: 0.05
 information_weight: 0.10
 repulsion_weight: 0.05
 regime_balance_weight: 0.01
-paths_per_context: 4
+paths_per_context: 8
 ```
 
 ## Running the project

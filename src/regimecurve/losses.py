@@ -86,6 +86,72 @@ def whitened_shape_covariance_loss(real: torch.Tensor, fake: torch.Tensor,
     return covariance_error + 0.1 * mean_error
 
 
+def _within_context_shape_covariances(
+    real: torch.Tensor, grouped_fake: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return historical and same-context generated shape covariances.
+
+    Historical samples supply horizon-change targets across conditioning states.
+    Generated terminal shapes are centred separately inside each context, so
+    covariance cannot be satisfied by changing the conditional mean between
+    unrelated contexts.
+    """
+    if grouped_fake.ndim != 4:
+        raise ValueError("grouped_fake must have shape [batch, paths, days, maturities]")
+    if grouped_fake.shape[1] < 2:
+        raise ValueError("At least two generated paths per context are required")
+    real_change = 100.0 * (real[:, -1] - real[:, 0])
+    real_shape = real_change - real_change.mean(dim=-1, keepdim=True)
+    fake_terminal = 100.0 * grouped_fake[:, :, -1]
+    fake_shape = fake_terminal - fake_terminal.mean(dim=-1, keepdim=True)
+    fake_within = fake_shape - fake_shape.mean(dim=1, keepdim=True)
+    real_covariance = covariance_matrix(real_shape)
+    flattened_fake = fake_within.flatten(0, 1)
+    denominator = grouped_fake.shape[0] * (grouped_fake.shape[1] - 1)
+    fake_covariance = flattened_fake.T @ flattened_fake / max(denominator, 1)
+    return real_covariance, fake_covariance, real_shape, flattened_fake
+
+
+def within_context_shape_covariance_loss(
+    real: torch.Tensor, grouped_fake: torch.Tensor,
+) -> torch.Tensor:
+    """Match covariance of repeated futures sampled from the same context."""
+    real_covariance, fake_covariance, _, _ = _within_context_shape_covariances(
+        real, grouped_fake
+    )
+    normaliser = real_covariance.detach().square().mean().clamp_min(1e-4)
+    return (real_covariance - fake_covariance).square().mean() / normaliser
+
+
+def within_context_whitened_shape_loss(
+    real: torch.Tensor, grouped_fake: torch.Tensor, modes: int = 6,
+) -> torch.Tensor:
+    """Match PC1--PC6 using only generated variation within each context."""
+    real_covariance, _, _, fake_within = _within_context_shape_covariances(
+        real, grouped_fake
+    )
+    eigenvalues, eigenvectors = torch.linalg.eigh(real_covariance.detach())
+    retained = min(modes, real.shape[-1] - 1, real.shape[0] - 1)
+    eigenvalues = eigenvalues[-retained:].clamp_min(1e-3)
+    eigenvectors = eigenvectors[:, -retained:]
+    whitening = eigenvectors / eigenvalues.sqrt().unsqueeze(0)
+    fake_scores = fake_within @ whitening
+    fake_covariance = covariance_matrix(fake_scores)
+    identity = torch.eye(retained, device=real.device, dtype=real.dtype)
+    return (fake_covariance - identity).square().mean()
+
+
+def within_context_shape_trace_loss(
+    real: torch.Tensor, grouped_fake: torch.Tensor,
+) -> torch.Tensor:
+    """Match total level-neutral variance independently of covariance direction."""
+    real_covariance, fake_covariance, _, _ = _within_context_shape_covariances(
+        real, grouped_fake
+    )
+    ratio = fake_covariance.trace() / real_covariance.detach().trace().clamp_min(1e-4)
+    return ratio.clamp_min(1e-4).log().square()
+
+
 def correlation_matrix(values: torch.Tensor) -> torch.Tensor:
     flattened = values.reshape(-1, values.shape[-1])
     centred = flattened - flattened.mean(dim=0, keepdim=True)

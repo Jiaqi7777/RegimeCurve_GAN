@@ -1,0 +1,87 @@
+{
+  "conditional_neighbours": 250,
+  "terminal_factor_change_bp": {
+    "Level (10Y)": {
+      "generated_mean": -5.954568000000027,
+      "generated_std": 18.320978135933576,
+      "historical_p05": -29.549999999999994,
+      "historical_median": 0.0,
+      "historical_p95": 29.999999999999982,
+      "outside_fraction": 0.1
+    },
+    "Slope (10Y-2Y)": {
+      "generated_mean": -0.2728950000000241,
+      "generated_std": 8.716767148348364,
+      "historical_p05": -14.549999999999997,
+      "historical_median": -1.5000000000000124,
+      "historical_p95": 14.999999999999947,
+      "outside_fraction": 0.1
+    },
+    "Curvature (2x5Y-2Y-10Y)": {
+      "generated_mean": -2.676482999999923,
+      "generated_std": 7.034360069773306,
+      "historical_p05": -10.549999999999923,
+      "historical_median": 0.0,
+      "historical_p95": 9.999999999999924,
+      "outside_fraction": 0.2
+    }
+  },
+  "outside_any_factor_fraction": 0.4,
+  "outside_any_factor_sensitivity_by_neighbours": {
+    "100": 0.6,
+    "250": 0.4
+  },
+  "maturity_outside_5_95_fraction": {
+    "1 Mo": 0.0,
+    "2 Mo": 0.0,
+    "3 Mo": 0.0,
+    "4 Mo": 0.0,
+    "6 Mo": 0.0,
+    "1 Yr": 0.0,
+    "2 Yr": 0.0,
+    "3 Yr": 0.1,
+    "5 Yr": 0.1,
+    "7 Yr": 0.1,
+    "10 Yr": 0.1,
+    "20 Yr": 0.1,
+    "30 Yr": 0.1
+  },
+  "pca_generated_to_historical_spread_ratio": {
+    "PC1": 0.4348667606983479,
+    "PC2": 0.8378613849463502,
+    "PC3": 0.6037692211582729,
+    "PC4": 0.6548931686919749
+  },
+  "representativeness_percentiles": [
+    0.616,
+    0.208,
+    0.608,
+    0.748,
+    0.748,
+    0.72,
+    0.112,
+    0.84,
+    0.692,
+    0.404
+  ],
+  "less_representative_than_95pct_fraction": 0.0,
+  "mean_terminal_curve_dispersion_bp": 12.177819534030252,
+  "mean_absolute_daily_move_bp": 3.12618783076923,
+  "maximum_daily_move_bp": 16.08236999999999,
+  "correlation_matrix_error": 0.641641451126893,
+  "level_neutral_shape_covariance_error": 1076.3250390518308,
+  "relative_shape_covariance_error": 0.6117837911518549,
+  "generated_to_historical_shape_variance_ratio": 0.4373153423759891,
+  "generated_to_historical_shape_mode_variance_ratio": {
+    "mode_1": 0.5000741854729024,
+    "mode_2": 0.2563376219935198,
+    "mode_3": 0.22337491097134576,
+    "mode_4": 0.4358214246952864,
+    "mode_5": 0.09650685562396766,
+    "mode_6": 0.12701258651635214
+  },
+  "warnings": [
+    "More than 20% of scenarios fall outside conditional factor ranges.",
+    "Generated level-neutral shape variance is below 60% of history."
+  ]
+}

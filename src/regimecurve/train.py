@@ -17,14 +17,15 @@ from .losses import (
     diversity_loss,
     economic_curve_features,
     gradient_penalty,
-    level_neutral_shape_covariance_loss,
     moment_loss,
     regime_balance_loss,
     repulsion_loss,
     shape_repulsion_loss,
     smoothness_loss,
     terminal_factor_loss,
-    whitened_shape_covariance_loss,
+    within_context_shape_covariance_loss,
+    within_context_shape_trace_loss,
+    within_context_whitened_shape_loss,
 )
 from .model import RegimeCurveGAN
 from .utils import ensure_output, load_config, set_seed
@@ -49,22 +50,33 @@ def build_model(config: dict, bundle) -> RegimeCurveGAN:
 
 
 @torch.no_grad()
-def validation_score(model: RegimeCurveGAN, loader, device: torch.device) -> float:
+def validation_score(model: RegimeCurveGAN, loader, device: torch.device,
+                     training_config: dict) -> float:
     model.eval()
     scores = []
+    paths = training_config["paths_per_context"]
     for context, future in loader:
         context, future = context.to(device), future.to(device)
-        generated, _, _, _ = model.generator(context)
-        real_curves, fake_curves = model.decoder(future), model.decoder(generated)
+        expanded_context = context.repeat_interleave(paths, dim=0)
+        generated, _, _, _ = model.generator(expanded_context)
+        real_curves = model.decoder(future)
+        fake_curves = model.decoder(generated)
+        real_expanded = real_curves.repeat_interleave(paths, dim=0)
+        grouped_fake = fake_curves.view(context.shape[0], paths, *fake_curves.shape[1:])
         scores.append((
-            moment_loss(real_curves, fake_curves)
-            + 0.05 * covariance_loss(real_curves, fake_curves)
-            + 0.25 * level_neutral_shape_covariance_loss(real_curves, fake_curves)
-            + 0.25 * whitened_shape_covariance_loss(real_curves, fake_curves)
-            + 0.25 * correlation_loss(real_curves, fake_curves)
-            + 0.10 * autocorrelation_loss(real_curves, fake_curves)
-            + 0.10 * daily_tail_loss(real_curves, fake_curves)
-            + terminal_factor_loss(real_curves, fake_curves)
+            moment_loss(real_expanded, fake_curves)
+            + training_config["covariance_weight"] * covariance_loss(real_expanded, fake_curves)
+            + training_config["shape_covariance_weight"]
+            * within_context_shape_covariance_loss(real_curves, grouped_fake)
+            + training_config["whitened_shape_weight"]
+            * within_context_whitened_shape_loss(real_curves, grouped_fake)
+            + training_config["shape_trace_weight"]
+            * within_context_shape_trace_loss(real_curves, grouped_fake)
+            + training_config["correlation_weight"] * correlation_loss(real_expanded, fake_curves)
+            + training_config["autocorrelation_weight"]
+            * autocorrelation_loss(real_expanded, fake_curves)
+            + training_config["daily_tail_weight"] * daily_tail_loss(real_expanded, fake_curves)
+            + training_config["terminal_weight"] * terminal_factor_loss(real_expanded, fake_curves)
         ).item())
     model.train()
     return float(sum(scores) / max(len(scores), 1))
@@ -128,11 +140,15 @@ def train(config: dict) -> Path:
                 generator_loss += cfg["smoothness_weight"] * smoothness_loss(curves)
                 generator_loss += cfg["moment_weight"] * moment_loss(real_expanded_curves, curves)
                 generator_loss += cfg["covariance_weight"] * covariance_loss(real_expanded_curves, curves)
+                real_curves = model.decoder(real_future)
                 generator_loss += cfg["shape_covariance_weight"] * (
-                    level_neutral_shape_covariance_loss(real_expanded_curves, curves)
+                    within_context_shape_covariance_loss(real_curves, grouped_curves)
                 )
                 generator_loss += cfg["whitened_shape_weight"] * (
-                    whitened_shape_covariance_loss(real_expanded_curves, curves)
+                    within_context_whitened_shape_loss(real_curves, grouped_curves)
+                )
+                generator_loss += cfg["shape_trace_weight"] * (
+                    within_context_shape_trace_loss(real_curves, grouped_curves)
                 )
                 generator_loss += cfg["correlation_weight"] * correlation_loss(
                     real_expanded_curves, curves
@@ -160,7 +176,7 @@ def train(config: dict) -> Path:
                 generator_optimizer.step()
                 generator_total += generator_loss.item()
 
-        score = validation_score(model, validation_loader, device)
+        score = validation_score(model, validation_loader, device, cfg)
         if score < best_score:
             best_score = score
             torch.save({
