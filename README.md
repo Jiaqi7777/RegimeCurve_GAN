@@ -124,7 +124,7 @@ GRU context encoder ───────────────► regime prob
 
 Generating all maturities independently makes it easy for a neural network to create irregular curve shapes and difficult to learn the strong dependence between maturities. Each observed curve is instead represented as
 
-\[
+$$
 y_t(\tau)
 =
 \beta_{0,t}
@@ -133,7 +133,7 @@ y_t(\tau)
 \frac{1-e^{-\lambda\tau}}{\lambda\tau}-e^{-\lambda\tau}
 \right)
 +\varepsilon_t(\tau).
-\]
+$$
 
 The first three coefficients approximately describe level, slope, and broad curvature. The remaining residual is represented by six smooth cubic-spline coordinates over log maturity. The spline dictionary is projected onto the orthogonal complement of the Nelson–Siegel span and then orthonormalised. These coordinates therefore cannot reproduce another parallel shift: they must describe local twists, butterflies, and long-end deformations. This replaces residual PCA, whose variance ordering concentrated capacity in a few historically dominant directions. The default latent curve state has nine dimensions.
 
@@ -220,7 +220,7 @@ A random split was deliberately avoided because neighbouring rolling windows ove
 
 The critics minimise the conditional Wasserstein objectives with gradient penalties. The generator objective is
 
-\[
+$$
 \mathcal L_G
 =
 \mathcal L_{\mathrm{adv}}
@@ -229,7 +229,7 @@ The critics minimise the conditional Wasserstein objectives with gradient penalt
 +\lambda_{\mathrm{cov}}\mathcal L_{\mathrm{cov}}
 +\lambda_{\mathrm{div}}\mathcal L_{\mathrm{div}}
 +\lambda_{\mathrm{regime}}\mathcal L_{\mathrm{regime}}.
-\]
+$$
 
 - **Adversarial loss** encourages temporal and cross-maturity realism.
 - **Smoothness loss** penalises excessive second differences across maturity.
